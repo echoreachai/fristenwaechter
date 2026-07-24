@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Fristen-Wächter</title>
+  <meta name="description" content="Retouren- & Kündigungsfristen im Blick — lokal & ohne Postfach-Suche." />
+  <meta name="theme-color" content="#1D2B3A" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" href="icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <header class="fw-header">
+    <div class="fw-header-top">
+      <div>
+        <p class="fw-eyebrow">Posteingangsbuch · Fristen</p>
+        <h1 class="fw-title">Fristen-Wächter</h1>
+      </div>
+      <div class="fw-menu-wrap">
+        <button class="fw-menu-btn" id="btn-menu" aria-label="Menü" aria-haspopup="true" aria-expanded="false">⋮</button>
+        <div class="fw-menu-dropdown" id="menu-dropdown" style="display:none">
+          <button class="fw-menu-item" id="menu-export">⭳ Backup exportieren</button>
+          <button class="fw-menu-item" id="menu-import">⭱ Backup importieren</button>
+          <button class="fw-menu-item" id="menu-sender">👤 Absenderdaten</button>
+          <button class="fw-menu-item" id="menu-feedback">💬 Feedback senden</button>
+        </div>
+      </div>
+    </div>
+    <p class="fw-sub">Retouren-Fristen &amp; Kündigungstermine im Blick — lokal &amp; ohne Postfach-Suche.</p>
+    <div class="fw-stats">
+      <div class="fw-stat">
+        <div class="fw-stat-num" id="stat-dringend" style="color:var(--red)">0</div>
+        <div class="fw-stat-label">Dringend</div>
+      </div>
+      <div class="fw-stat">
+        <div class="fw-stat-num" id="stat-bald" style="color:var(--amber)">0</div>
+        <div class="fw-stat-label">Bald fällig</div>
+      </div>
+      <div class="fw-stat">
+        <div class="fw-stat-num" id="stat-aktiv">0</div>
+        <div class="fw-stat-label">Aktiv</div>
+      </div>
+      <div class="fw-stat">
+        <div class="fw-stat-num" id="stat-gesamt">0</div>
+        <div class="fw-stat-label">Gesamt</div>
+      </div>
+    </div>
+  </header>
+
+  <div class="fw-notif-banner" id="fw-notif-banner" style="display:none">
+    <span></span>
+    <button id="fw-notif-btn">Aktivieren</button>
+  </div>
+
+  <div class="fw-error" id="fw-error" style="display:none"></div>
+
+  <div class="fw-toolbar">
+    <div class="fw-tabs">
+      <button class="fw-tab active" data-filter="aktiv">Aktiv</button>
+      <button class="fw-tab" data-filter="erledigt">Erledigt</button>
+      <button class="fw-tab" data-filter="alle">Alle</button>
+    </div>
+    <button class="fw-add-btn" id="btn-add">+ Neue Frist</button>
+  </div>
+
+  <div class="fw-list" id="fw-list"></div>
+
+  <button class="fw-fab" id="fab-add" aria-label="Neue Frist hinzufügen">+</button>
+
+  <!-- Modal: neue Frist -->
+  <div class="fw-overlay" id="fw-overlay" style="display:none">
+    <div class="fw-modal">
+      <h2 class="fw-modal-title">Neue Frist eintragen</h2>
+      <p class="fw-modal-sub">Alles bleibt lokal auf diesem Gerät gespeichert.</p>
+      <form id="fw-form">
+        <div class="fw-field">
+          <span class="fw-label">Art</span>
+          <div class="fw-type-toggle">
+            <div class="fw-type-opt active" data-type="retoure">Widerruf / Retoure</div>
+            <div class="fw-type-opt" data-type="abo">Abo-Kündigung</div>
+            <div class="fw-type-opt" data-type="strafzettel">Strafzettel</div>
+            <div class="fw-type-opt" data-type="rechnung">Offene Rechnung</div>
+          </div>
+        </div>
+
+        <div class="fw-field">
+          <label class="fw-label" for="input-produkt">Produkt / Anbieter</label>
+          <input class="fw-input" id="input-produkt" placeholder="z. B. Winterjacke, Zalando" required />
+        </div>
+
+        <div class="fw-field" id="field-erhalten">
+          <label class="fw-label" for="input-erhalten">Ware erhalten am</label>
+          <input type="date" class="fw-input" id="input-erhalten" />
+          <p class="fw-hint">14-Tage-Widerrufsfrist wird automatisch berechnet (inkl. gesetzlicher Feiertage NRW).</p>
+        </div>
+
+        <div class="fw-field" id="field-abo" style="display:none">
+          <label class="fw-label" for="input-abo">Kündigungsfrist / Stichtag</label>
+          <input type="date" class="fw-input" id="input-abo" />
+          <p class="fw-hint">Trage den letzten Tag ein, an dem du kündigen kannst — laut deinem Vertrag.</p>
+        </div>
+
+        <div class="fw-field" id="field-strafzettel" style="display:none">
+          <label class="fw-label" for="input-strafzettel">Zahlungs-/Einspruchsfrist</label>
+          <input type="date" class="fw-input" id="input-strafzettel" />
+          <p class="fw-hint">Datum vom Bußgeld-/Verwarnungsbescheid übertragen.</p>
+        </div>
+
+        <div class="fw-field" id="field-rechnung" style="display:none">
+          <label class="fw-label" for="input-rechnung">Fälligkeitsdatum</label>
+          <input type="date" class="fw-input" id="input-rechnung" />
+          <p class="fw-hint">Letzter Tag, an dem die Rechnung bezahlt sein muss.</p>
+        </div>
+
+        <div class="fw-field">
+          <span class="fw-label">Berechnetes Fristende</span>
+          <div class="fw-preview-line" id="preview-line"></div>
+        </div>
+
+        <div class="fw-field">
+          <label class="fw-label" for="input-betrag">Betrag in € (optional)</label>
+          <input type="number" step="0.01" min="0" inputmode="decimal" class="fw-input" id="input-betrag" placeholder="z. B. 49.90" />
+        </div>
+
+        <div class="fw-field">
+          <label class="fw-label" for="input-notiz">Notiz (optional)</label>
+          <textarea class="fw-textarea" id="input-notiz" placeholder="z. B. Bestellnummer, Rücksendegrund …"></textarea>
+        </div>
+
+        <div class="fw-field" id="field-referenz" style="display:none">
+          <label class="fw-label" for="input-referenz" id="label-referenz">Kundennummer (optional)</label>
+          <input class="fw-input" id="input-referenz" />
+          <p class="fw-hint" id="hint-referenz">Wird, falls angegeben, im Kündigungs-/Einspruchsschreiben genannt.</p>
+        </div>
+
+        <div class="fw-field" id="field-adresse" style="display:none">
+          <label class="fw-label" for="input-adresse" id="label-adresse">Anbieter-Adresse (optional)</label>
+          <textarea class="fw-textarea" id="input-adresse" placeholder="Firma GmbH&#10;Musterstraße 2&#10;12345 Musterstadt"></textarea>
+          <p class="fw-hint">Wird als Empfängeradresse ins Schreiben eingesetzt — ohne Angabe bleibt ein Platzhalter stehen.</p>
+        </div>
+
+        <div class="fw-field" id="field-zahlung" style="display:none">
+          <label class="fw-label" for="input-empfaenger">Zahlungsempfänger (optional)</label>
+          <input class="fw-input" id="input-empfaenger" placeholder="Firma GmbH" />
+          <label class="fw-label" for="input-iban" style="margin-top:12px">IBAN (optional)</label>
+          <input class="fw-input" id="input-iban" placeholder="DE89 3704 0044 0532 0130 00" autocapitalize="characters" />
+          <p class="fw-hint">Wird beim Foto-/PDF-Scan automatisch erkannt, wenn vorhanden — bitte trotzdem gegenprüfen.</p>
+        </div>
+
+        <div class="fw-field">
+          <label class="fw-label" for="input-file">Lieferschein / Retourenlabel (Foto oder PDF)</label>
+          <input type="file" class="fw-input" id="input-file" accept="image/*,application/pdf" />
+          <div class="fw-file-row" id="file-row" style="display:none"></div>
+          <p class="fw-hint" id="file-error" style="display:none;color:var(--red)"></p>
+          <p class="fw-hint" id="ocr-status" style="display:none"></p>
+        </div>
+
+        <div class="fw-modal-actions">
+          <button type="button" class="fw-btn-secondary" id="btn-cancel">Abbrechen</button>
+          <button type="submit" class="fw-btn-primary" id="btn-save" disabled>Speichern</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Beleg-Viewer -->
+  <div class="fw-viewer-overlay" id="fw-viewer-overlay" style="display:none">
+    <div class="fw-viewer-box">
+      <button class="fw-viewer-close" id="fw-viewer-close">✕</button>
+      <div id="fw-viewer-content"></div>
+    </div>
+  </div>
+
+  <!-- Backup exportieren -->
+  <div class="fw-overlay" id="export-overlay" style="display:none">
+    <div class="fw-modal">
+      <h2 class="fw-modal-title">Backup exportieren</h2>
+      <p class="fw-modal-sub">Enthält alle Einträge inkl. hinterlegter Fotos/PDFs. Die Datei bleibt bei dir — es wird nichts hochgeladen.</p>
+
+      <div class="fw-field">
+        <label class="fw-label" style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;letter-spacing:0;font-size:13.5px;">
+          <input type="checkbox" id="export-encrypt-toggle" style="width:16px;height:16px;" />
+          Mit Passwort verschlüsseln
+        </label>
+      </div>
+      <div class="fw-field" id="export-pw-field" style="display:none">
+        <label class="fw-label" for="export-pw">Passwort</label>
+        <input type="password" class="fw-input" id="export-pw" autocomplete="new-password" />
+      </div>
+      <div class="fw-field" id="export-pw2-field" style="display:none">
+        <label class="fw-label" for="export-pw2">Passwort wiederholen</label>
+        <input type="password" class="fw-input" id="export-pw2" autocomplete="new-password" />
+        <p class="fw-hint">Wichtig: Ohne dieses Passwort lässt sich das Backup später nicht mehr entschlüsseln.</p>
+      </div>
+      <p class="fw-hint" id="export-error" style="display:none;color:var(--red)"></p>
+
+      <div class="fw-modal-actions">
+        <button type="button" class="fw-btn-secondary" id="export-cancel">Abbrechen</button>
+        <button type="button" class="fw-btn-primary" id="export-confirm">Backup erstellen</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Backup importieren -->
+  <div class="fw-overlay" id="import-overlay" style="display:none">
+    <div class="fw-modal">
+      <h2 class="fw-modal-title">Backup importieren</h2>
+      <p class="fw-modal-sub">Wähle eine zuvor exportierte Backup-Datei aus, um sie auf diesem Gerät wiederherzustellen.</p>
+
+      <div class="fw-field">
+        <label class="fw-label" for="import-file">Backup-Datei</label>
+        <input type="file" class="fw-input" id="import-file" accept="application/json,.json" />
+      </div>
+      <div class="fw-field" id="import-pw-field" style="display:none">
+        <label class="fw-label" for="import-pw">Passwort</label>
+        <input type="password" class="fw-input" id="import-pw" autocomplete="current-password" />
+      </div>
+      <p class="fw-hint" id="import-info" style="display:none"></p>
+      <p class="fw-hint" id="import-error" style="display:none;color:var(--red)"></p>
+
+      <div class="fw-modal-actions" id="import-initial-actions">
+        <button type="button" class="fw-btn-secondary" id="import-cancel">Abbrechen</button>
+        <button type="button" class="fw-btn-primary" id="import-confirm">Backup lesen</button>
+      </div>
+      <div class="fw-modal-actions" id="import-mode-actions" style="display:none">
+        <button type="button" class="fw-btn-secondary" id="import-merge">Hinzufügen</button>
+        <button type="button" class="fw-btn-primary" id="import-replace">Ersetzen</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Absenderdaten -->
+  <div class="fw-overlay" id="sender-overlay" style="display:none">
+    <div class="fw-modal">
+      <h2 class="fw-modal-title">Absenderdaten</h2>
+      <p class="fw-modal-sub">Werden für Kündigungs-/Einspruchsschreiben als Absender verwendet und nur lokal auf diesem Gerät gespeichert.</p>
+      <div class="fw-field">
+        <label class="fw-label" for="sender-name">Name</label>
+        <input class="fw-input" id="sender-name" placeholder="Vor- und Nachname" />
+      </div>
+      <div class="fw-field">
+        <label class="fw-label" for="sender-strasse">Straße &amp; Hausnummer</label>
+        <input class="fw-input" id="sender-strasse" />
+      </div>
+      <div class="fw-field">
+        <label class="fw-label" for="sender-plzort">PLZ &amp; Ort</label>
+        <input class="fw-input" id="sender-plzort" placeholder="z. B. 47798 Krefeld" />
+      </div>
+      <p class="fw-hint" id="sender-error" style="display:none;color:var(--red)"></p>
+      <div class="fw-modal-actions">
+        <button type="button" class="fw-btn-secondary" id="sender-cancel">Abbrechen</button>
+        <button type="button" class="fw-btn-primary" id="sender-save">Speichern</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Feedback senden -->
+  <div class="fw-overlay" id="feedback-overlay" style="display:none">
+    <div class="fw-modal">
+      <h2 class="fw-modal-title">Feedback senden</h2>
+      <p class="fw-modal-sub">Öffnet deine Mail-App mit einer vorausgefüllten Nachricht an echoreachai@gmail.com — dort einmal auf Senden tippen.</p>
+
+      <div class="fw-field">
+        <label class="fw-label" for="feedback-text">Deine Nachricht</label>
+        <textarea class="fw-textarea" id="feedback-text" style="min-height:130px" placeholder="Was funktioniert gut, was nicht, welche Ideen hast du?" maxlength="1500"></textarea>
+        <p class="fw-hint" id="feedback-counter">0 / 1500 Zeichen</p>
+      </div>
+      <p class="fw-hint" id="feedback-error" style="display:none;color:var(--red)"></p>
+
+      <div class="fw-modal-actions">
+        <button type="button" class="fw-btn-secondary" id="feedback-cancel">Abbrechen</button>
+        <button type="button" class="fw-btn-primary" id="feedback-send" disabled>In Mail-App öffnen</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
