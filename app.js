@@ -487,11 +487,21 @@ function metaLine(entry) {
   return base;
 }
 
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function renderCard(entry) {
   const status = statusOf(entry);
   const dleft = daysUntil(entry.deadline);
   const isErledigt = entry.status === "erledigt";
   const meta = STATUS_META[status];
+  const typeLabel = TYPE_META[entry.type] ? TYPE_META[entry.type].label : escapeHtml(entry.type);
 
   const card = document.createElement("div");
   card.className = `fw-card ${isErledigt ? "is-erledigt" : ""}`;
@@ -499,7 +509,7 @@ function renderCard(entry) {
     ${stampSVG(status, dleft)}
     <div class="fw-card-body">
       <div class="fw-card-top">
-        <span class="fw-type-badge">${TYPE_META[entry.type] ? TYPE_META[entry.type].label : entry.type}</span>
+        <span class="fw-type-badge">${typeLabel}</span>
         <span class="fw-type-badge" style="color:${meta.color};border-color:${meta.color}">${meta.label}</span>
       </div>
       <p class="fw-produkt ${isErledigt ? "strike" : ""}"></p>
