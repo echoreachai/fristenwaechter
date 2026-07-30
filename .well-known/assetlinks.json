@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.echoreach.fristenwaechter",
+      "sha256_cert_fingerprints": [
+        "A2:56:37:79:75:8D:82:A4:B3:BE:C0:36:B2:71:E3:7C:2A:AB:91:BB:83:5C:4C:BB:B3:8E:6D:FF:67:AD:D5:42"
+      ]
+    }
+  }
+]
