@@ -1,0 +1,59 @@
+name: Build iOS App (PWA)
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-ios:
+    runs-on: macos-latest
+    name: Generate & Build iOS Wrapper
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install PWABuilder CLI
+        run: npm install -g pwabuilder
+
+      - name: Generate iOS Wrapper
+        run: |
+          pwabuilder ios \
+            --url https://echoreachai.github.io/fristenwaechter \
+            --output ios-wrapper
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Build iOS App
+        run: |
+          xcodebuild \
+            -project ios-wrapper/ios/YourPWA.xcodeproj \
+            -scheme YourPWA \
+            -configuration Release \
+            -sdk iphoneos \
+            build
+
+      - name: Archive App
+        run: |
+          xcodebuild \
+            -project ios-wrapper/ios/YourPWA.xcodeproj \
+            -scheme YourPWA \
+            -configuration Release \
+            -sdk iphoneos \
+            -archivePath build/YourPWA.xcarchive \
+            archive
+
+      - name: Export IPA
+        run: |
+          xcodebuild \
+            -exportArchive \
+            -archivePath build/YourPWA.xcarchive \
+            -exportOptionsPlist ios-wrapper/ios/exportOptions.plist \
+            -exportPath build
