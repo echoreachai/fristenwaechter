@@ -8,13 +8,11 @@ on:
 jobs:
   build-ios:
     runs-on: macos-latest
-    name: Generate & Build iOS Wrapper
-
     steps:
-      - name: Checkout Repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Node
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -22,38 +20,67 @@ jobs:
       - name: Install PWABuilder CLI
         run: npm install -g pwabuilder
 
-      - name: Generate iOS Wrapper
+      - name: Generate iOS wrapper with PWABuilder
         run: |
-          pwabuilder ios \
-            --url https://echoreachai.github.io/fristenwaechter \
-            --output ios-wrapper
+          pwabuilder ios --url https://echoreachai.github.io/fristenwaechter --output ios-wrapper
+        # optional: capture output for debugging
+      - name: Show generated files (debug)
+        run: |
+          echo "=== ios-wrapper top-level ==="
+          ls -la ios-wrapper || true
+          echo "=== ios-wrapper/ios ==="
+          ls -la ios-wrapper/ios || true
+          echo "=== find xcodeproj / xcworkspace ==="
+          find ios-wrapper -maxdepth 4 -type d \( -name "*.xcodeproj" -o -name "*.xcworkspace" \) -print || true
 
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode.app
 
-      - name: Build iOS App
+      - name: Build (auto-detect project/workspace)
         run: |
-          xcodebuild \
-            -project ios-wrapper/ios/YourPWA.xcodeproj \
-            -scheme YourPWA \
-            -configuration Release \
-            -sdk iphoneos \
-            build
+          set -e
+          # find project or workspace
+          PROJ=$(find ios-wrapper -maxdepth 4 -name "*.xcodeproj" | head -n1 || true)
+          WORKSPACE=$(find ios-wrapper -maxdepth 4 -name "*.xcworkspace" | head -n1 || true)
+          echo "Found project: $PROJ"
+          echo "Found workspace: $WORKSPACE"
 
-      - name: Archive App
-        run: |
-          xcodebuild \
-            -project ios-wrapper/ios/YourPWA.xcodeproj \
-            -scheme YourPWA \
-            -configuration Release \
-            -sdk iphoneos \
-            -archivePath build/YourPWA.xcarchive \
-            archive
+          if [ -n "$WORKSPACE" ]; then
+            # if workspace exists, prefer workspace build
+            SCHEME=$(ls "$WORKSPACE/../" | grep -E '\.xcodeproj' | sed -E 's/\.xcodeproj$//' | head -n1 || true)
+            echo "Using workspace build. Scheme guess: $SCHEME"
+            xcodebuild -workspace "$WORKSPACE" -scheme "$SCHEME" -configuration Release -sdk iphoneos build
+          elif [ -n "$PROJ" ]; then
+            SCHEME=$(basename "$PROJ" .xcodeproj)
+            echo "Using project build. Scheme: $SCHEME"
+            xcodebuild -project "$PROJ" -scheme "$SCHEME" -configuration Release -sdk iphoneos build
+          else
+            echo "ERROR: No .xcodeproj or .xcworkspace found under ios-wrapper."
+            exit 66
+          fi
 
-      - name: Export IPA
+      - name: Archive & Export (optional)
+        if: success()
         run: |
-          xcodebuild \
-            -exportArchive \
-            -archivePath build/YourPWA.xcarchive \
-            -exportOptionsPlist ios-wrapper/ios/exportOptions.plist \
-            -exportPath build
+          # Passe scheme/projectname und exportOptions.plist an, falls vorhanden
+          PROJ=$(find ios-wrapper -maxdepth 4 -name "*.xcodeproj" | head -n1 || true)
+          WORKSPACE=$(find ios-wrapper -maxdepth 4 -name "*.xcworkspace" | head -n1 || true)
+          if [ -n "$WORKSPACE" ]; then
+            SCHEME=$(ls "$WORKSPACE/../" | grep -E '\.xcodeproj' | sed -E 's/\.xcodeproj$//' | head -n1 || true)
+            ARCHIVE_PATH=build/${SCHEME}.xcarchive
+            xcodebuild -workspace "$WORKSPACE" -scheme "$SCHEME" -configuration Release -sdk iphoneos -archivePath "$ARCHIVE_PATH" archive
+            if [ -f ios-wrapper/ios/exportOptions.plist ]; then
+              xcodebuild -exportArchive -archivePath "$ARCHIVE_PATH" -exportOptionsPlist ios-wrapper/ios/exportOptions.plist -exportPath build
+            else
+              echo "No exportOptions.plist found; skipping exportArchive."
+            fi
+          elif [ -n "$PROJ" ]; then
+            SCHEME=$(basename "$PROJ" .xcodeproj)
+            ARCHIVE_PATH=build/${SCHEME}.xcarchive
+            xcodebuild -project "$PROJ" -scheme "$SCHEME" -configuration Release -sdk iphoneos -archivePath "$ARCHIVE_PATH" archive
+            if [ -f ios-wrapper/ios/exportOptions.plist ]; then
+              xcodebuild -exportArchive -archivePath "$ARCHIVE_PATH" -exportOptionsPlist ios-wrapper/ios/exportOptions.plist -exportPath build
+            else
+              echo "No exportOptions.plist found; skipping exportArchive."
+            fi
+          fi
