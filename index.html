@@ -90,6 +90,15 @@
         </div>
 
         <div class="fw-field">
+          <label class="fw-label" for="input-file">📷 Beleg scannen (Foto oder PDF)</label>
+          <input type="file" class="fw-input" id="input-file" accept="image/*,application/pdf" />
+          <div class="fw-file-row" id="file-row" style="display:none"></div>
+          <p class="fw-hint" id="file-error" style="display:none;color:var(--red)"></p>
+          <p class="fw-hint" id="ocr-status" style="display:none"></p>
+          <p class="fw-hint">Füllt Datum, Betrag & mehr automatisch aus — die restlichen Felder unten kannst du danach einfach noch prüfen.</p>
+        </div>
+
+        <div class="fw-field">
           <label class="fw-label" for="input-produkt">Produkt / Anbieter</label>
           <input class="fw-input" id="input-produkt" placeholder="z. B. Winterjacke, Zalando" required />
         </div>
@@ -151,14 +160,6 @@
           <label class="fw-label" for="input-iban" style="margin-top:12px">IBAN (optional)</label>
           <input class="fw-input" id="input-iban" placeholder="DE89 3704 0044 0532 0130 00" autocapitalize="characters" />
           <p class="fw-hint">Wird beim Foto-/PDF-Scan automatisch erkannt, wenn vorhanden — bitte trotzdem gegenprüfen.</p>
-        </div>
-
-        <div class="fw-field">
-          <label class="fw-label" for="input-file">Lieferschein / Retourenlabel (Foto oder PDF)</label>
-          <input type="file" class="fw-input" id="input-file" accept="image/*,application/pdf" />
-          <div class="fw-file-row" id="file-row" style="display:none"></div>
-          <p class="fw-hint" id="file-error" style="display:none;color:var(--red)"></p>
-          <p class="fw-hint" id="ocr-status" style="display:none"></p>
         </div>
 
         <div class="fw-modal-actions">
