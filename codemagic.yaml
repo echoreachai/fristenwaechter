@@ -7,8 +7,8 @@ workflows:
       app_store_connect: A7Y6Q4TYBX
     environment:
       ios_signing:
-        distribution_type: app_store
-        bundle_identifier: com.echoreach.fristenwaechter
+        distribution_type: iOS
+        bundle_identifier: FristenWaechter - com.echoreach.fristenwaechter
       vars:
         XCODE_PROJECT: "ios/App/App.xcodeproj"
         XCODE_SCHEME: "App"
