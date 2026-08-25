@@ -4,17 +4,16 @@ workflows:
     max_build_duration: 60
     instance_type: mac_mini_m2
     integrations:
-      app_store_connect: 6Q6ZDCBY9V # Name des API-Keys, den du in Codemagic hinterlegst
+      app_store_connect: 6Q6ZDCBY9V
     environment:
       ios_signing:
         distribution_type: app_store
-        bundle_identifier: com.echoreach.fristenwaechter # anpassen an deine tatsächliche Bundle-ID
+        bundle_identifier: com.echoreach.fristenwaechter
       vars:
-        XCODE_WORKSPACE: "ios/App/App.xcworkspace"
+        XCODE_PROJECT: "ios/App/App.xcodeproj"
         XCODE_SCHEME: "App"
       node: latest
       xcode: latest
-      cocoapods: default
     triggering:
       events:
         - push
@@ -26,19 +25,17 @@ workflows:
         script: |
           npm install
 
-      - name: Build web app (PWA)
-        script: |
-          npm run build
-          # Passe diesen Befehl an dein PWA-Buildscript an,
-          # falls es anders heißt (z.B. "npm run build:prod")
+      # Kein separater Web-Build-Schritt noetig: die PWA ist statisches
+      # HTML/CSS/JS im Repo-Root (index.html, app.js, styles.css), es gibt
+      # keinen Bundler/Build-Prozess. "npx cap sync" nimmt die Dateien
+      # direkt aus webDir (siehe capacitor.config.json).
 
       - name: Sync Capacitor iOS platform
         script: |
           npx cap sync ios
 
-      - name: Install CocoaPods dependencies
-        script: |
-          cd ios/App && pod install
+      # Kein "pod install" noetig: Capacitor 8 nutzt Swift Package Manager
+      # (siehe ios/App/CapApp-SPM), es gibt kein Podfile in diesem Projekt.
 
       - name: Set up code signing settings
         script: |
@@ -52,7 +49,7 @@ workflows:
       - name: Build ipa for distribution
         script: |
           xcode-project build-ipa \
-            --workspace "$XCODE_WORKSPACE" \
+            --project "$XCODE_PROJECT" \
             --scheme "$XCODE_SCHEME"
 
     artifacts:
@@ -64,4 +61,4 @@ workflows:
       app_store_connect:
         auth: integration
         submit_to_testflight: true
-        # submit_to_app_store: true   # erst aktivieren, wenn du direkt zur Review einreichen willst
+        # submit_to_app_store: true   # erst aktivieren, wenn direkt zur Review eingereicht werden soll
