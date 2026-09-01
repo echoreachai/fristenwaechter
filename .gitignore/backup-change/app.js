@@ -487,11 +487,21 @@ function metaLine(entry) {
   return base;
 }
 
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function renderCard(entry) {
   const status = statusOf(entry);
   const dleft = daysUntil(entry.deadline);
   const isErledigt = entry.status === "erledigt";
   const meta = STATUS_META[status];
+  const typeLabel = TYPE_META[entry.type] ? TYPE_META[entry.type].label : escapeHtml(entry.type);
 
   const card = document.createElement("div");
   card.className = `fw-card ${isErledigt ? "is-erledigt" : ""}`;
@@ -499,7 +509,7 @@ function renderCard(entry) {
     ${stampSVG(status, dleft)}
     <div class="fw-card-body">
       <div class="fw-card-top">
-        <span class="fw-type-badge">${TYPE_META[entry.type] ? TYPE_META[entry.type].label : entry.type}</span>
+        <span class="fw-type-badge">${typeLabel}</span>
         <span class="fw-type-badge" style="color:${meta.color};border-color:${meta.color}">${meta.label}</span>
       </div>
       <p class="fw-produkt ${isErledigt ? "strike" : ""}"></p>
@@ -510,7 +520,6 @@ function renderCard(entry) {
         <button class="fw-action" data-action="toggle">${isErledigt ? "Wieder aktivieren" : "Als erledigt markieren"}</button>
         ${entry.beleg ? `<button class="fw-action" data-action="view">Beleg ansehen</button>` : ""}
         ${entry.type === "abo" ? `<button class="fw-action" data-action="letter">Kündigung erstellen</button>` : ""}
-        ${entry.type === "abo" ? `<button class="fw-action" data-action="compare">Alternativen vergleichen</button>` : ""}
         ${entry.type === "strafzettel" ? `<button class="fw-action" data-action="letter">Einspruch erstellen</button>` : ""}
         ${entry.type === "rechnung" && entry.iban ? `<button class="fw-action" data-action="copy-iban">IBAN kopieren</button>` : ""}
         <button class="fw-action danger" data-action="delete">Löschen</button>
@@ -535,8 +544,6 @@ function renderCard(entry) {
   if (viewBtn) viewBtn.addEventListener("click", () => openViewer(entry.beleg));
   const letterBtn = card.querySelector('[data-action="letter"]');
   if (letterBtn) letterBtn.addEventListener("click", () => generateLetterPdf(entry));
-  const compareBtn = card.querySelector('[data-action="compare"]');
-  if (compareBtn) compareBtn.addEventListener("click", () => generateComparePdf(entry));
   const copyIbanBtn = card.querySelector('[data-action="copy-iban"]');
   if (copyIbanBtn) {
     copyIbanBtn.addEventListener("click", async () => {
@@ -1408,126 +1415,6 @@ function generateLetterPdf(entry) {
   const prefix = isAbo ? "Kuendigung" : "Einspruch";
   const safeName = entry.produkt.replace(/[^\w\-]+/g, "_").replace(/_+/g, "_").slice(0, 40) || "Schreiben";
   doc.save(`${prefix}_${safeName}.pdf`);
-}
-
-/* ---------- Alternativen-Vergleich (nur per Button, keine Automatik) ----------
-   Bewusst KEINE fest eingebauten Preise: Abo-Preise ändern sich laufend,
-   und die App hat keinen Server/keine Live-Recherche zur Laufzeit. Falsche
-   Preisangaben wären hier schlimmer als gar keine. Stattdessen verweist die
-   PDF auf die offizielle Anbieter-Seite (falls erkannt) und auf unabhängige
-   Vergleichsportale — beides bleibt aktuell, weil es nur auf die Quelle
-   verlinkt statt Zahlen zu kopieren. */
-
-const KNOWN_PROVIDERS = [
-  { match: ["netflix"], name: "Netflix", url: "https://www.netflix.com/de/" },
-  { match: ["disney"], name: "Disney+", url: "https://www.disneyplus.com/de-de" },
-  { match: ["amazon prime", "prime video"], name: "Amazon Prime Video", url: "https://www.primevideo.com/" },
-  { match: ["spotify"], name: "Spotify", url: "https://www.spotify.com/de/premium/" },
-  { match: ["dazn"], name: "DAZN", url: "https://www.dazn.com/de-DE/welcome" },
-  { match: ["sky", "wow"], name: "WOW (ehem. Sky Ticket)", url: "https://www.wow.de/" },
-  { match: ["apple tv"], name: "Apple TV+", url: "https://www.apple.com/de/apple-tv-plus/" },
-  { match: ["youtube premium", "youtube music"], name: "YouTube Premium", url: "https://www.youtube.com/premium" },
-  { match: ["audible"], name: "Audible", url: "https://www.audible.de/" },
-  { match: ["paramount"], name: "Paramount+", url: "https://www.paramountplus.com/de/" },
-  { match: ["magenta"], name: "MagentaTV", url: "https://www.telekom.de/magenta-tv" },
-  { match: ["joyn"], name: "Joyn", url: "https://www.joyn.de/" },
-];
-function matchKnownProvider(produktName) {
-  const lower = produktName.toLowerCase();
-  return KNOWN_PROVIDERS.find((p) => p.match.some((m) => lower.includes(m))) || null;
-}
-
-function generateComparePdf(entry) {
-  if (typeof window.jspdf === "undefined") {
-    window.alert("PDF-Bibliothek konnte nicht geladen werden — bitte Internetverbindung prüfen und erneut versuchen.");
-    return;
-  }
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ unit: "mm", format: "a4" });
-  const marginLeft = 25;
-  const marginRight = 25;
-  const pageWidth = 210;
-  const textWidth = pageWidth - marginLeft - marginRight;
-  let y = 24;
-
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(16);
-  doc.text("Alternativen-Vergleich", marginLeft, y);
-  y += 8;
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(11);
-  doc.text(`Für: ${entry.produkt}`, marginLeft, y);
-  y += 12;
-
-  doc.setFontSize(9.5);
-  doc.setTextColor(120, 120, 120);
-  const introText = "Diese Seite verlinkt bewusst nur auf offizielle Seiten und Vergleichsportale, statt Preise fest anzugeben — Abo-Preise ändern sich laufend, dort findest du immer den aktuellen Stand.";
-  const introLines = doc.splitTextToSize(introText, textWidth);
-  doc.text(introLines, marginLeft, y);
-  y += introLines.length * 4.6 + 10;
-  doc.setTextColor(0, 0, 0);
-
-  const provider = matchKnownProvider(entry.produkt);
-  if (provider) {
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(11);
-    doc.text("Offizielle Seite (aktuelle Tarife/Pakete):", marginLeft, y);
-    y += 6.5;
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(10.5);
-    doc.text(`${provider.name}`, marginLeft, y);
-    y += 5.5;
-    doc.setTextColor(30, 80, 160);
-    doc.textWithLink(`→ ${provider.url}`, marginLeft, y, { url: provider.url });
-    doc.setTextColor(0, 0, 0);
-    y += 12;
-  }
-
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(11);
-  doc.text("Unabhängige Vergleichsportale:", marginLeft, y);
-  y += 6.5;
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(10.5);
-  const verivoxUrl = "https://www.verivox.de/streaming/angebote/";
-  const check24Url = "https://www.check24.de/internet/streaming/";
-  doc.text("Verivox Streaming-Vergleich", marginLeft, y);
-  y += 5.5;
-  doc.setTextColor(30, 80, 160);
-  doc.textWithLink(`→ ${verivoxUrl}`, marginLeft, y, { url: verivoxUrl });
-  doc.setTextColor(0, 0, 0);
-  y += 8;
-  doc.setFontSize(10.5);
-  doc.text("Check24 Streaming-Vergleich", marginLeft, y);
-  y += 5.5;
-  doc.setTextColor(30, 80, 160);
-  doc.textWithLink(`→ ${check24Url}`, marginLeft, y, { url: check24Url });
-  doc.setTextColor(0, 0, 0);
-  y += 12;
-
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(11);
-  doc.text("Direkte Suche:", marginLeft, y);
-  y += 6.5;
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(10.5);
-  const searchUrl = `https://www.google.com/search?q=${encodeURIComponent("günstigere Alternative zu " + entry.produkt)}`;
-  const searchLabel = doc.splitTextToSize(`"Günstigere Alternative zu ${entry.produkt}"`, textWidth);
-  doc.text(searchLabel, marginLeft, y);
-  y += searchLabel.length * 5 + 1.5;
-  doc.setTextColor(30, 80, 160);
-  doc.textWithLink("→ Google-Suche öffnen", marginLeft, y, { url: searchUrl });
-  doc.setTextColor(0, 0, 0);
-  y += 12;
-
-  doc.setFontSize(8);
-  doc.setTextColor(150, 150, 150);
-  const disclaimer = "Automatisch erstellte Übersicht aus der Fristen-Wächter App. Enthält keine Preisangaben oder Empfehlungen — nur Links zu Seiten mit aktuellem Stand. Kein Kauf- oder Abo-Zwang, keine Provision.";
-  doc.text(doc.splitTextToSize(disclaimer, textWidth), marginLeft, 285);
-  doc.setTextColor(0, 0, 0);
-
-  const safeName = entry.produkt.replace(/[^\w\-]+/g, "_").replace(/_+/g, "_").slice(0, 40) || "Abo";
-  doc.save(`Alternativen_${safeName}.pdf`);
 }
 
 /* ---------- Service Worker registrieren ---------- */
