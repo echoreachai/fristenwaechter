@@ -143,6 +143,11 @@ erzeugt eine PDF mit:
 - den unabhängigen Vergleichsportalen **Verivox** und **Check24**,
 - einer direkten Google-Suche nach günstigeren Alternativen.
 
+Bei **unbekannten Anbietern** (kein Treffer in der Liste oben) öffnet sich
+zusätzlich sofort eine Google-Suche mit dem Eintragstitel als Suchbegriff
+in einem neuen Tab — ohne erst die PDF öffnen und den Link anklicken zu
+müssen. Die PDF wird trotzdem erzeugt, als Referenz zum Später-Nachschauen.
+
 Bewusst **keine festen Preisangaben**: Da die App keinen Server und keine
 Live-Recherche zur Laufzeit hat, würden eingebaute Preise mit der Zeit
 veraltet und potenziell falsch sein. Links dagegen bleiben aktuell, weil

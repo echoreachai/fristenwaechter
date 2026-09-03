@@ -1468,6 +1468,17 @@ function generateComparePdf(entry) {
   doc.setTextColor(0, 0, 0);
 
   const provider = matchKnownProvider(entry.produkt);
+  const searchUrl = `https://www.google.com/search?q=${encodeURIComponent("günstigere Alternative zu " + entry.produkt)}`;
+
+  // Bei unbekannten Anbietern gibt's keinen sinnvollen "offiziellen Link" —
+  // dafür öffnet sich direkt eine Google-Suche mit dem Eintragstitel als
+  // Suchbegriff, damit sofort etwas Brauchbares da ist, statt nur ein
+  // weiterer Link in der PDF. Der Klick auf den Button zählt als
+  // Nutzer-Geste, Popup-Blocker greifen hier also nicht.
+  if (!provider) {
+    window.open(searchUrl, "_blank", "noopener");
+  }
+
   if (provider) {
     doc.setFont("helvetica", "bold");
     doc.setFontSize(11);
@@ -1507,11 +1518,10 @@ function generateComparePdf(entry) {
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(11);
-  doc.text("Direkte Suche:", marginLeft, y);
+  doc.text(!provider ? "Direkte Suche (wurde bereits geöffnet):" : "Direkte Suche:", marginLeft, y);
   y += 6.5;
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10.5);
-  const searchUrl = `https://www.google.com/search?q=${encodeURIComponent("günstigere Alternative zu " + entry.produkt)}`;
   const searchLabel = doc.splitTextToSize(`"Günstigere Alternative zu ${entry.produkt}"`, textWidth);
   doc.text(searchLabel, marginLeft, y);
   y += searchLabel.length * 5 + 1.5;
