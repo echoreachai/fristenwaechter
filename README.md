@@ -134,25 +134,23 @@ Stelle dann einfach über `if (!isPro()) { ... }`.
 ## Alternativen vergleichen (bei Abo-Kündigungen)
 
 Bei Abo-Einträgen gibt es einen Button **"Alternativen vergleichen"**, der
-nur bei Klick aktiv wird (keine automatische Hintergrund-Abfrage). Er
-erzeugt eine PDF mit:
+nur bei Klick aktiv wird (keine automatische Hintergrund-Abfrage). Er öffnet
+ein Popup mit anklickbaren Optionen:
 
 - der **offiziellen Anbieter-Seite**, falls die App den Dienst erkennt
   (u. a. Netflix, Disney+, Amazon Prime Video, Spotify, DAZN, WOW, Apple
   TV+, YouTube Premium, Audible, Paramount+, MagentaTV, Joyn),
 - den unabhängigen Vergleichsportalen **Verivox** und **Check24**,
-- einer direkten Google-Suche nach günstigeren Alternativen.
+- einer Google-Suche nach günstigeren Alternativen (Suchbegriff ist der
+  Eintragstitel).
 
-Bei **unbekannten Anbietern** (kein Treffer in der Liste oben) öffnet sich
-zusätzlich sofort eine Google-Suche mit dem Eintragstitel als Suchbegriff
-in einem neuen Tab — ohne erst die PDF öffnen und den Link anklicken zu
-müssen. Die PDF wird trotzdem erzeugt, als Referenz zum Später-Nachschauen.
-
-Bewusst **keine festen Preisangaben**: Da die App keinen Server und keine
-Live-Recherche zur Laufzeit hat, würden eingebaute Preise mit der Zeit
-veraltet und potenziell falsch sein. Links dagegen bleiben aktuell, weil
-sie direkt auf die Quelle verweisen. Es handelt sich um reine Verlinkung,
-keine Affiliate-/Provisions-Links.
+Ein Klick auf eine Option öffnet die jeweilige Seite direkt in einem neuen
+Tab, die App bleibt dabei im Hintergrund offen. Bewusst **keine festen
+Preisangaben**: Da die App keinen Server und keine Live-Recherche zur
+Laufzeit hat, würden eingebaute Preise mit der Zeit veraltet und
+potenziell falsch sein. Links dagegen bleiben aktuell, weil sie direkt auf
+die Quelle verweisen. Es handelt sich um reine Verlinkung, keine
+Affiliate-/Provisions-Links.
 
 ## Kündigungs- und Einspruchsschreiben (PDF)
 
