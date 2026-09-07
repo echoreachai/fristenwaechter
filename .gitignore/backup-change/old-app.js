@@ -536,7 +536,7 @@ function renderCard(entry) {
   const letterBtn = card.querySelector('[data-action="letter"]');
   if (letterBtn) letterBtn.addEventListener("click", () => generateLetterPdf(entry));
   const compareBtn = card.querySelector('[data-action="compare"]');
-  if (compareBtn) compareBtn.addEventListener("click", () => openComparePopup(entry));
+  if (compareBtn) compareBtn.addEventListener("click", () => generateComparePdf(entry));
   const copyIbanBtn = card.querySelector('[data-action="copy-iban"]');
   if (copyIbanBtn) {
     copyIbanBtn.addEventListener("click", async () => {
@@ -1437,69 +1437,108 @@ function matchKnownProvider(produktName) {
   return KNOWN_PROVIDERS.find((p) => p.match.some((m) => lower.includes(m))) || null;
 }
 
-const compareOverlay = $("#compare-overlay");
-const compareSubtitle = $("#compare-subtitle");
-const compareButtonsWrap = $("#compare-buttons");
+function generateComparePdf(entry) {
+  if (typeof window.jspdf === "undefined") {
+    window.alert("PDF-Bibliothek konnte nicht geladen werden — bitte Internetverbindung prüfen und erneut versuchen.");
+    return;
+  }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: "mm", format: "a4" });
+  const marginLeft = 25;
+  const marginRight = 25;
+  const pageWidth = 210;
+  const textWidth = pageWidth - marginLeft - marginRight;
+  let y = 24;
 
-function makeCompareButton({ label, sub, url }) {
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.className = "fw-compare-btn";
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(16);
+  doc.text("Alternativen-Vergleich", marginLeft, y);
+  y += 8;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(11);
+  doc.text(`Für: ${entry.produkt}`, marginLeft, y);
+  y += 12;
 
-  const left = document.createElement("span");
-  const labelEl = document.createElement("span");
-  labelEl.className = "fw-compare-label";
-  labelEl.textContent = label;
-  const subEl = document.createElement("span");
-  subEl.className = "fw-compare-sub";
-  subEl.textContent = sub;
-  left.appendChild(labelEl);
-  left.appendChild(subEl);
+  doc.setFontSize(9.5);
+  doc.setTextColor(120, 120, 120);
+  const introText = "Diese Seite verlinkt bewusst nur auf offizielle Seiten und Vergleichsportale, statt Preise fest anzugeben — Abo-Preise ändern sich laufend, dort findest du immer den aktuellen Stand.";
+  const introLines = doc.splitTextToSize(introText, textWidth);
+  doc.text(introLines, marginLeft, y);
+  y += introLines.length * 4.6 + 10;
+  doc.setTextColor(0, 0, 0);
 
-  const arrow = document.createElement("span");
-  arrow.className = "fw-compare-arrow";
-  arrow.textContent = "↗";
-
-  btn.appendChild(left);
-  btn.appendChild(arrow);
-  btn.addEventListener("click", () => {
-    window.open(url, "_blank", "noopener");
-  });
-  return btn;
-}
-
-// Zeigt ein Popup mit Buttons statt einer PDF — Klick auf eine Option
-// leitet direkt (neuer Tab) zur Zielseite weiter. Bewusst keine
-// Preisangaben, da sich Abo-Preise laufend ändern; die Links bleiben
-// dadurch immer aktuell.
-function openComparePopup(entry) {
   const provider = matchKnownProvider(entry.produkt);
   const searchUrl = `https://www.google.com/search?q=${encodeURIComponent("günstigere Alternative zu " + entry.produkt)}`;
-  const verivoxUrl = "https://www.verivox.de/streaming/angebote/";
-  const check24Url = "https://www.check24.de/internet/streaming/";
 
-  compareSubtitle.textContent = `Für: ${entry.produkt}`;
-  compareButtonsWrap.innerHTML = "";
+  // Bei unbekannten Anbietern gibt's keinen sinnvollen "offiziellen Link" —
+  // dafür öffnet sich direkt eine Google-Suche mit dem Eintragstitel als
+  // Suchbegriff, damit sofort etwas Brauchbares da ist, statt nur ein
+  // weiterer Link in der PDF. Der Klick auf den Button zählt als
+  // Nutzer-Geste, Popup-Blocker greifen hier also nicht.
+  if (!provider) {
+    window.open(searchUrl, "_blank", "noopener");
+  }
 
   if (provider) {
-    compareButtonsWrap.appendChild(
-      makeCompareButton({ label: provider.name, sub: "Offizielle Seite – aktuelle Tarife/Pakete", url: provider.url })
-    );
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.text("Offizielle Seite (aktuelle Tarife/Pakete):", marginLeft, y);
+    y += 6.5;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10.5);
+    doc.text(`${provider.name}`, marginLeft, y);
+    y += 5.5;
+    doc.setTextColor(30, 80, 160);
+    doc.textWithLink(`→ ${provider.url}`, marginLeft, y, { url: provider.url });
+    doc.setTextColor(0, 0, 0);
+    y += 12;
   }
-  compareButtonsWrap.appendChild(
-    makeCompareButton({ label: "Verivox", sub: "Unabhängiger Streaming-Vergleich", url: verivoxUrl })
-  );
-  compareButtonsWrap.appendChild(
-    makeCompareButton({ label: "Check24", sub: "Unabhängiger Streaming-Vergleich", url: check24Url })
-  );
-  compareButtonsWrap.appendChild(
-    makeCompareButton({ label: "Google-Suche", sub: `"Günstigere Alternative zu ${entry.produkt}"`, url: searchUrl })
-  );
 
-  compareOverlay.style.display = "flex";
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.text("Unabhängige Vergleichsportale:", marginLeft, y);
+  y += 6.5;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10.5);
+  const verivoxUrl = "https://www.verivox.de/streaming/angebote/";
+  const check24Url = "https://www.check24.de/internet/streaming/";
+  doc.text("Verivox Streaming-Vergleich", marginLeft, y);
+  y += 5.5;
+  doc.setTextColor(30, 80, 160);
+  doc.textWithLink(`→ ${verivoxUrl}`, marginLeft, y, { url: verivoxUrl });
+  doc.setTextColor(0, 0, 0);
+  y += 8;
+  doc.setFontSize(10.5);
+  doc.text("Check24 Streaming-Vergleich", marginLeft, y);
+  y += 5.5;
+  doc.setTextColor(30, 80, 160);
+  doc.textWithLink(`→ ${check24Url}`, marginLeft, y, { url: check24Url });
+  doc.setTextColor(0, 0, 0);
+  y += 12;
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.text(!provider ? "Direkte Suche (wurde bereits geöffnet):" : "Direkte Suche:", marginLeft, y);
+  y += 6.5;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10.5);
+  const searchLabel = doc.splitTextToSize(`"Günstigere Alternative zu ${entry.produkt}"`, textWidth);
+  doc.text(searchLabel, marginLeft, y);
+  y += searchLabel.length * 5 + 1.5;
+  doc.setTextColor(30, 80, 160);
+  doc.textWithLink("→ Google-Suche öffnen", marginLeft, y, { url: searchUrl });
+  doc.setTextColor(0, 0, 0);
+  y += 12;
+
+  doc.setFontSize(8);
+  doc.setTextColor(150, 150, 150);
+  const disclaimer = "Automatisch erstellte Übersicht aus der Fristen-Wächter App. Enthält keine Preisangaben oder Empfehlungen — nur Links zu Seiten mit aktuellem Stand. Kein Kauf- oder Abo-Zwang, keine Provision.";
+  doc.text(doc.splitTextToSize(disclaimer, textWidth), marginLeft, 285);
+  doc.setTextColor(0, 0, 0);
+
+  const safeName = entry.produkt.replace(/[^\w\-]+/g, "_").replace(/_+/g, "_").slice(0, 40) || "Abo";
+  doc.save(`Alternativen_${safeName}.pdf`);
 }
-$("#compare-close").addEventListener("click", () => { compareOverlay.style.display = "none"; });
-compareOverlay.addEventListener("mousedown", (e) => { if (e.target === compareOverlay) compareOverlay.style.display = "none"; });
 
 /* ---------- Service Worker registrieren ---------- */
 
