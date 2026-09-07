@@ -499,7 +499,7 @@ function renderCard(entry) {
     ${stampSVG(status, dleft)}
     <div class="fw-card-body">
       <div class="fw-card-top">
-        <span class="fw-type-badge">${TYPE_META[entry.type] ? TYPE_META[entry.type].label : entry.type}</span>
+        <span class="fw-type-badge fw-type-text"></span>
         <span class="fw-type-badge" style="color:${meta.color};border-color:${meta.color}">${meta.label}</span>
       </div>
       <p class="fw-produkt ${isErledigt ? "strike" : ""}"></p>
@@ -517,6 +517,11 @@ function renderCard(entry) {
       </div>
     </div>
   `;
+
+  const typeTextEl = card.querySelector(".fw-type-text");
+  if (typeTextEl) {
+    typeTextEl.textContent = TYPE_META[entry.type] ? TYPE_META[entry.type].label : entry.type;
+  }
   // Texte per textContent setzen (XSS-sicher bei Nutzereingaben)
   card.querySelector(".fw-produkt").textContent = entry.produkt;
   card.querySelector(".fw-meta").textContent = metaLine(entry);
