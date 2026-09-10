@@ -80,6 +80,40 @@ body{
 .fw-menu-item:last-child{ border-bottom: none; }
 .fw-menu-item:hover{ background: var(--paper-2); }
 
+.fw-compare-btn{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font-body);
+}
+.fw-compare-btn:hover{ background: var(--paper-2); border-color: var(--ink); }
+.fw-compare-label{
+  display: block;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.fw-compare-sub{
+  display: block;
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--slate);
+  margin-top: 2px;
+}
+.fw-compare-arrow{
+  color: var(--slate);
+  font-size: 17px;
+  flex-shrink: 0;
+}
+
 .fw-eyebrow{
   font-family: var(--font-mono);
   font-size: 11px;

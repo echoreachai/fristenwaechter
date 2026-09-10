@@ -93,6 +93,26 @@ eindeutig die Gesamtsumme ("Gesamtbetrag", "Endbetrag") und überspringt
 bewusst Zwischensummen wie "Nettobetrag", damit nicht versehentlich der
 Betrag vor Mehrwertsteuer übernommen wird.
 
+## Verbesserte Erkennung (Anbieter, Zahlungsempfänger, Betrag)
+
+- **Anbieter/Zahlungsempfänger**: Die App bewertet jetzt Textzeilen im Beleg
+  nach Position und Schriftgröße statt einfach nur die erste Zeile zu
+  nehmen — Firmennamen im Briefkopf stehen meist oben rechts oder in
+  größerer Schrift, genau das wird jetzt bevorzugt erkannt. Bei
+  "Zahlungsempfänger" wird zuerst nach einem expliziten Stichwort gesucht
+  ("Zahlungsempfänger", "Kontoinhaber" …), dann dasselbe Verfahren wie beim
+  Anbieter angewandt, als letzte Rückfallebene das bereits erkannte
+  Anbieter-Feld.
+- **Betrag-Priorität**: Erkennt zuerst "Gesamtbetrag"/"Gesamtsumme", dann
+  "Überweisungsbetrag"/"zu zahlen(der Betrag)", erst danach die bisherigen,
+  allgemeineren Stichwörter.
+
+## Deutlicherer Scan-Hinweis
+
+Während ein Foto/PDF gelesen wird, zeigt die App jetzt einen auffälligen
+Hinweis mit Lade-Spinner (statt eines kleinen grauen Texthinweises) —
+leichter zu erkennen, dass die Erkennung noch läuft.
+
 ## Texterkennung (OCR) beim Foto-Upload
 
 Beim Hochladen eines Fotos (Lieferschein, Bescheid, Rechnung) liest die App
@@ -131,6 +151,30 @@ zurückgibt. Beim Einbau von Google Play Billing (Digital Goods API) wird
 nur diese eine Funktion ausgetauscht — Feature-Gating an beliebiger
 Stelle dann einfach über `if (!isPro()) { ... }`.
 
+## Sicherheit
+
+Die App wurde auf typische Web-Schwachstellen geprüft. Behoben:
+
+- **pdf.js CVE-2024-4367** (Ausführung von beliebigem JavaScript über ein
+  präpariertes PDF): Bibliothek von v3.11.174 auf v4.9.155 aktualisiert
+  (dabei technisch auf ES-Module umgestellt, da neuere pdf.js-Versionen
+  keinen klassischen `<script>`-Import mehr unterstützen).
+- **Gespeichertes XSS über Backup-Import**: Ein unbekannter/manipulierter
+  `entry.type` wurde früher roh ins HTML eingesetzt. Wird jetzt immer über
+  eine feste Whitelist aufgelöst; importierte Einträge werden zusätzlich
+  komplett auf ein festes, geprüftes Feld-Schema zurechtgestutzt.
+- **PDF-Beleg-Viewer**: `iframe` läuft jetzt mit `sandbox`-Attribut (keine
+  Skriptausführung), und es wird der tatsächliche Inhalt der Datei geprüft
+  statt nur einem mitgeführten `mime`-Feld zu vertrauen.
+- **Externe Bibliotheken**: jsPDF und Tesseract.js werden jetzt mit
+  Subresource-Integrity-Prüfung (`integrity`-Attribut) geladen, sodass ein
+  kompromittiertes CDN nicht unbemerkt anderen Code ausliefern könnte.
+- **`window.open`**-Aufrufe nutzen jetzt zusätzlich zu `noopener` auch
+  `noreferrer`.
+- **Backup-Verschlüsselung**: PBKDF2-Runden von 200.000 auf 600.000 erhöht
+  (aktuelle OWASP-Empfehlung für PBKDF2-HMAC-SHA256). Bestehende Backups
+  bleiben entschlüsselbar, da jede Datei ihre eigene Rundenzahl mitführt.
+
 ## Alternativen vergleichen (bei Abo-Kündigungen)
 
 Bei Abo-Einträgen gibt es einen Button **"Alternativen vergleichen"**, der
@@ -139,10 +183,16 @@ ein Popup mit anklickbaren Optionen:
 
 - der **offiziellen Anbieter-Seite**, falls die App den Dienst erkennt
   (u. a. Netflix, Disney+, Amazon Prime Video, Spotify, DAZN, WOW, Apple
-  TV+, YouTube Premium, Audible, Paramount+, MagentaTV, Joyn),
-- den unabhängigen Vergleichsportalen **Verivox** und **Check24**,
+  TV+, YouTube Premium, Audible, Paramount+, MagentaTV, Joyn, sowie die
+  Mobilfunk-Anbieter Vodafone, Telekom, o2, 1&1, congstar),
+- den unabhängigen Vergleichsportalen **Verivox** und **Check24** — aber
+  nur, wenn die Kategorie des Eintrags dazu passt (aktuell: Streaming und
+  Mobilfunk, mit jeweils verifizierten Sparten-Links). Bei anderen
+  Abo-Arten (z. B. Fitnessstudio, Versicherung, Zeitschrift) werden diese
+  beiden Buttons bewusst **nicht** angezeigt, statt einen unpassenden
+  Vergleichslink zu zeigen,
 - einer Google-Suche nach günstigeren Alternativen (Suchbegriff ist der
-  Eintragstitel).
+  Eintragstitel) — funktioniert für jede Kategorie.
 
 Ein Klick auf eine Option öffnet die jeweilige Seite direkt in einem neuen
 Tab, die App bleibt dabei im Hintergrund offen. Bewusst **keine festen

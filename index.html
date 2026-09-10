@@ -94,7 +94,10 @@
           <input type="file" class="fw-input" id="input-file" accept="image/*,application/pdf" />
           <div class="fw-file-row" id="file-row" style="display:none"></div>
           <p class="fw-hint" id="file-error" style="display:none;color:var(--red)"></p>
-          <p class="fw-hint" id="ocr-status" style="display:none"></p>
+          <div class="fw-ocr-status" id="ocr-status" style="display:none">
+            <span class="fw-ocr-spinner" id="ocr-spinner"></span>
+            <span id="ocr-status-text"></span>
+          </div>
           <p class="fw-hint">Füllt Datum, Betrag & mehr automatisch aus — die restlichen Felder unten kannst du danach einfach noch prüfen.</p>
         </div>
 
@@ -294,9 +297,15 @@
     </div>
   </div>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js" integrity="sha384-en/ztfPSRkGfME4KIm05joYXynqzUgbsG5nMrj/xEFAHXkeZfO3yMK8QQ+mP7p1/" crossorigin="anonymous"></script>
+  <script type="module">
+    // pdf.js 4.x+ liefert nur noch ES-Module aus (kein klassisches <script src> mehr
+    // möglich) — dieser kleine Wrapper macht die Bibliothek trotzdem als globales
+    // "pdfjsLib" verfügbar, damit app.js unverändert darauf zugreifen kann.
+    import * as pdfjsLib from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.9.155/build/pdf.min.mjs";
+    window.pdfjsLib = pdfjsLib;
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js" integrity="sha384-GJqSu7vueQ9qN0E9yLPb3Wtpd7OrgK8KmYzC8T1IysG1bcvxvIO4qtYR/D3A991F" crossorigin="anonymous"></script>
   <script src="app.js"></script>
 </body>
 </html>
