@@ -609,9 +609,6 @@ function metaLine(entry) {
   else if (entry.type === "strafzettel") base = `Zahlungs-/Einspruchsfrist: ${formatDate(entry.deadline)}`;
   else if (entry.type === "rechnung") base = `Fällig am: ${formatDate(entry.deadline)}`;
   else base = `Fristende: ${formatDate(entry.deadline)}`;
-  if (entry.betrag !== null && entry.betrag !== undefined && entry.betrag !== "") {
-    base += ` · ${formatEuro(Number(entry.betrag))}`;
-  }
   if (entry.referenz) {
     base += ` · Ref.: ${entry.referenz}`;
   }
@@ -637,7 +634,10 @@ function renderCard(entry) {
         <span class="fw-type-badge"></span>
         <span class="fw-type-badge" style="color:${meta.color};border-color:${meta.color}">${meta.label}</span>
       </div>
-      <p class="fw-produkt ${isErledigt ? "strike" : ""}"></p>
+      <div class="fw-title-row">
+        <p class="fw-produkt ${isErledigt ? "strike" : ""}"></p>
+        ${entry.betrag !== null && entry.betrag !== undefined && entry.betrag !== "" ? `<p class="fw-amount"></p>` : ""}
+      </div>
       <p class="fw-meta"></p>
       ${entry.notiz ? `<p class="fw-notiz"></p>` : ""}
       ${entry.type === "rechnung" && entry.iban ? `<p class="fw-notiz" id="iban-line" style="font-family:var(--font-mono)"></p>` : ""}
@@ -655,6 +655,8 @@ function renderCard(entry) {
   card.querySelector(".fw-type-badge").textContent = typeLabel;
   // Texte per textContent setzen (XSS-sicher bei Nutzereingaben)
   card.querySelector(".fw-produkt").textContent = entry.produkt;
+  const amountEl = card.querySelector(".fw-amount");
+  if (amountEl) amountEl.textContent = formatEuro(Number(entry.betrag));
   card.querySelector(".fw-meta").textContent = metaLine(entry);
   if (entry.notiz) card.querySelector(".fw-notiz").textContent = entry.notiz;
   const ibanLine = card.querySelector("#iban-line");

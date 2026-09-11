@@ -428,6 +428,44 @@ body{
   border: 1px solid var(--line);
 }
 .fw-hint{ font-size: 11.5px; color: var(--slate); margin-top: 4px; }
+
+.fw-ocr-status{
+  display: none;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  font-size: 12.5px;
+  font-weight: 700;
+  margin-top: 8px;
+  line-height: 1.35;
+}
+.fw-ocr-status.is-loading{
+  background: rgba(201,138,43,0.14);
+  color: var(--amber);
+  border: 1px solid rgba(201,138,43,0.4);
+}
+.fw-ocr-status.is-success{
+  background: rgba(63,107,79,0.13);
+  color: var(--green);
+  border: 1px solid rgba(63,107,79,0.35);
+}
+.fw-ocr-status.is-neutral{
+  background: var(--paper-2);
+  color: var(--slate);
+  border: 1px solid var(--line);
+  font-weight: 600;
+}
+.fw-ocr-spinner{
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(201,138,43,0.35);
+  border-top-color: var(--amber);
+  animation: fw-spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes fw-spin{ to { transform: rotate(360deg); } }
 .fw-error{
   background: rgba(166,58,50,0.10);
   color: var(--red);

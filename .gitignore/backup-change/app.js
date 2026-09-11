@@ -79,7 +79,7 @@ function getOcrWorker() {
 }
 
 if (typeof pdfjsLib !== "undefined") {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.9.155/build/pdf.worker.min.mjs";
 }
 
 // Liest Text aus einem PDF. Digital erzeugte PDFs (Rechnungen, Bescheide)
@@ -92,12 +92,21 @@ async function extractTextFromPdf(file) {
   const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
   const maxPages = Math.min(pdf.numPages, 3);
   let text = "";
+  let firstPageLines = [];
   for (let i = 1; i <= maxPages; i++) {
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
     text += "\n" + content.items.map((it) => it.str || "").join(" ");
+    if (i === 1) {
+      try {
+        firstPageLines = buildLinesFromPdfTextContent(content, page.getViewport({ scale: 1 }));
+      } catch (e) {
+        firstPageLines = [];
+      }
+    }
   }
   if (text.trim().length < 20) {
+    // Vermutlich ein gescanntes PDF ohne Textebene -> als Bild rendern und per OCR lesen.
     const page = await pdf.getPage(1);
     const viewport = page.getViewport({ scale: 2 });
     const canvas = document.createElement("canvas");
@@ -108,8 +117,9 @@ async function extractTextFromPdf(file) {
     const worker = await getOcrWorker();
     const { data } = await worker.recognize(canvas.toDataURL("image/png"));
     text = (data && data.text) || "";
+    return { text, lines: linesFromTesseractData(data) };
   }
-  return text;
+  return { text, lines: firstPageLines };
 }
 
 function toValidDate(dStr, moStr, yStr) {
@@ -204,7 +214,8 @@ function parseGermanNumber(str) {
 function parseAmountFromText(text) {
   const skipLine = /(netto|zwischensumme|MwSt-?Satz)/i;
   const tiers = [
-    /(gesamtbetrag|endbetrag|rechnungsbetrag|gesamtsumme|zu\s?zahlen(?:der\s?betrag)?|zahlbetrag)[^\d]{0,15}(\d{1,3}(?:\.\d{3})*,\d{2})/i,
+    /(gesamtbetrag|gesamtsumme|endbetrag|rechnungsbetrag)[^\d]{0,15}(\d{1,3}(?:\.\d{3})*,\d{2})/i,
+    /(überweisungsbetrag|ueberweisungsbetrag|zu\s?zahlen(?:der\s?betrag)?|zahlbetrag)[^\d]{0,15}(\d{1,3}(?:\.\d{3})*,\d{2})/i,
     /\b(gesamt|summe|betrag)[^\d]{0,15}(\d{1,3}(?:\.\d{3})*,\d{2})/i,
   ];
   for (const tier of tiers) {
@@ -226,6 +237,8 @@ function parseAmountFromText(text) {
 
 // Naiver Anbieter-Vorschlag: erste plausible Textzeile (meist Firmenname
 // im Kopf des Belegs). Nur ein Vorschlag, der Mensch prüft ihn.
+// Fallback, falls keine Positionsdaten vorliegen: einfach die erste
+// plausible Textzeile.
 function guessMerchant(text) {
   for (const raw of text.split("\n")) {
     const line = raw.trim();
@@ -234,6 +247,85 @@ function guessMerchant(text) {
     return line;
   }
   return null;
+}
+
+// Anbieter/Absender/Zahlungsempfänger stehen auf Belegen fast immer im
+// Kopfbereich — meist oben rechts (Briefkopf) oder in größerer Schrift
+// (Firmenlogo/-name). Diese Funktion bewertet erkannte Textzeilen anhand
+// ihrer Position und Schriftgröße (aus OCR-Bounding-Boxen bzw. PDF-Text-
+// Transformationen) und wählt die plausibelste Kopfzeile — statt einfach
+// nur die erste Zeile im Text zu nehmen.
+function isPlausibleHeaderText(text) {
+  const t = (text || "").trim();
+  if (t.length < 2 || t.length > 60) return false;
+  if (/^[\d.,\-\/\s€%:]+$/.test(t)) return false; // rein numerisch/Datum/Betrag
+  return true;
+}
+function scoreHeaderCandidate(line, pageWidth, pageHeight, maxHeight) {
+  const sizeScore = maxHeight > 0 ? line.height / maxHeight : 0;
+  const verticalFraction = pageHeight > 0 ? line.top / pageHeight : 0;
+  const topScore = Math.max(0, 1 - verticalFraction / 0.35); // Bonus für oberste ~35% der Seite
+  const rightFraction = pageWidth > 0 ? line.right / pageWidth : 0;
+  const rightScore = rightFraction > 0.55 ? 0.3 : 0; // kleiner Bonus für rechtsstehenden Text
+  return sizeScore * 1.5 + topScore * 1.2 + rightScore;
+}
+function guessHeaderCandidate(lines) {
+  if (!lines || !lines.length) return null;
+  const plausible = lines.filter((l) => isPlausibleHeaderText(l.text));
+  if (!plausible.length) return null;
+  const pageWidth = Math.max(...lines.map((l) => l.right));
+  const pageHeight = Math.max(...lines.map((l) => l.bottom));
+  const maxHeight = Math.max(...plausible.map((l) => l.height));
+  let best = null;
+  let bestScore = -Infinity;
+  for (const line of plausible) {
+    const score = scoreHeaderCandidate(line, pageWidth, pageHeight, maxHeight);
+    if (score > bestScore) {
+      bestScore = score;
+      best = line;
+    }
+  }
+  return best ? best.text.trim() : null;
+}
+// Baut Zeilen mit Position/Größe aus dem pdf.js-Textlayer einer Seite:
+// Textfragmente mit ähnlichem y-Wert werden zu einer Zeile zusammengefasst.
+function buildLinesFromPdfTextContent(content, viewport) {
+  const groups = new Map();
+  for (const item of content.items) {
+    if (!item.str || !item.str.trim()) continue;
+    const fontHeight = Math.abs(item.transform[3]) || Math.abs(item.transform[0]) || 10;
+    const x0 = item.transform[4];
+    const y = item.transform[5];
+    const width = item.width || item.str.length * fontHeight * 0.5;
+    const x1 = x0 + width;
+    const key = Math.round(y / 3) * 3; // Zeilen mit ähnlichem y zusammenfassen
+    if (!groups.has(key)) groups.set(key, { text: "", x0, x1, y0: y, y1: y + fontHeight, height: fontHeight });
+    const g = groups.get(key);
+    g.text += (g.text ? " " : "") + item.str;
+    g.x0 = Math.min(g.x0, x0);
+    g.x1 = Math.max(g.x1, x1);
+    g.height = Math.max(g.height, fontHeight);
+  }
+  const pageHeight = viewport.height;
+  // PDF-Koordinaten wachsen nach oben — für unsere top/bottom-Logik umdrehen.
+  return Array.from(groups.values()).map((g) => ({
+    text: g.text,
+    left: g.x0,
+    right: g.x1,
+    top: pageHeight - g.y1,
+    bottom: pageHeight - g.y0,
+    height: g.height,
+  }));
+}
+function linesFromTesseractData(data) {
+  return ((data && data.lines) || []).map((l) => ({
+    text: l.text,
+    left: l.bbox.x0,
+    right: l.bbox.x1,
+    top: l.bbox.y0,
+    bottom: l.bbox.y1,
+    height: l.bbox.y1 - l.bbox.y0,
+  }));
 }
 
 // IBAN-Prüfsumme (ISO 7064 MOD 97-10): erste 4 Zeichen ans Ende verschieben,
@@ -340,6 +432,45 @@ const TYPE_META = {
   strafzettel: { label: "Strafzettel" },
   rechnung: { label: "Offene Rechnung" },
 };
+
+// Sicherheit: Einträge aus einer importierten Backup-Datei kommen von
+// außen (die Datei könnte manipuliert oder von einer fremden Quelle sein).
+// Statt die Felder ungeprüft zu übernehmen, wird hier jeder Eintrag auf
+// eine feste, bekannte Form zurechtgestutzt — unbekannte/zusätzliche
+// Felder fallen weg, Strings werden gekappt, der Typ wird gegen die
+// Whitelist oben geprüft.
+function sanitizeImportedEntry(raw) {
+  const str = (v, max) => (typeof v === "string" ? v.slice(0, max || 500) : "");
+  const num = (v) => (typeof v === "number" && isFinite(v) ? v : null);
+  const type = Object.keys(TYPE_META).includes(raw.type) ? raw.type : "retoure";
+  let beleg = null;
+  if (raw.beleg && typeof raw.beleg === "object") {
+    const dataUrl = typeof raw.beleg.dataUrl === "string" ? raw.beleg.dataUrl : null;
+    const validDataUrl = dataUrl && /^data:(application\/pdf|image\/(png|jpe?g|webp|gif));base64,/.test(dataUrl);
+    beleg = {
+      name: str(raw.beleg.name, 200) || "Beleg",
+      mime: raw.beleg.mime === "application/pdf" ? "application/pdf" : "image/jpeg",
+      dataUrl: validDataUrl ? dataUrl : null,
+    };
+  }
+  return {
+    id: str(raw.id, 100) || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    type,
+    produkt: str(raw.produkt, 200) || "Ohne Titel",
+    erhalten: str(raw.erhalten, 10),
+    deadline: str(raw.deadline, 10) || toISO(new Date()),
+    betrag: num(raw.betrag),
+    notiz: str(raw.notiz, 1000),
+    referenz: str(raw.referenz, 100),
+    adresse: str(raw.adresse, 500),
+    empfaenger: str(raw.empfaenger, 200),
+    iban: str(raw.iban, 40),
+    beleg,
+    status: raw.status === "erledigt" ? "erledigt" : "aktiv",
+    createdAt: str(raw.createdAt, 40) || new Date().toISOString(),
+  };
+}
+
 function formatEuro(amount) {
   return new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR" }).format(amount);
 }
@@ -492,6 +623,10 @@ function renderCard(entry) {
   const dleft = daysUntil(entry.deadline);
   const isErledigt = entry.status === "erledigt";
   const meta = STATUS_META[status];
+  // Sicherheit: entry.type kommt bei importierten Backups potenziell von
+  // außen. Nie den Rohwert ins HTML einsetzen — nur über die feste
+  // TYPE_META-Liste auflösen, sonst neutralen Text anzeigen.
+  const typeLabel = TYPE_META[entry.type] ? TYPE_META[entry.type].label : "Eintrag";
 
   const card = document.createElement("div");
   card.className = `fw-card ${isErledigt ? "is-erledigt" : ""}`;
@@ -499,7 +634,7 @@ function renderCard(entry) {
     ${stampSVG(status, dleft)}
     <div class="fw-card-body">
       <div class="fw-card-top">
-        <span class="fw-type-badge fw-type-text"></span>
+        <span class="fw-type-badge"></span>
         <span class="fw-type-badge" style="color:${meta.color};border-color:${meta.color}">${meta.label}</span>
       </div>
       <p class="fw-produkt ${isErledigt ? "strike" : ""}"></p>
@@ -517,11 +652,7 @@ function renderCard(entry) {
       </div>
     </div>
   `;
-
-  const typeTextEl = card.querySelector(".fw-type-text");
-  if (typeTextEl) {
-    typeTextEl.textContent = TYPE_META[entry.type] ? TYPE_META[entry.type].label : entry.type;
-  }
+  card.querySelector(".fw-type-badge").textContent = typeLabel;
   // Texte per textContent setzen (XSS-sicher bei Nutzereingaben)
   card.querySelector(".fw-produkt").textContent = entry.produkt;
   card.querySelector(".fw-meta").textContent = metaLine(entry);
@@ -607,6 +738,8 @@ const previewLine = $("#preview-line");
 const fileRow = $("#file-row");
 const fileError = $("#file-error");
 const ocrStatus = $("#ocr-status");
+const ocrSpinner = $("#ocr-spinner");
+const ocrStatusText = $("#ocr-status-text");
 const saveBtn = $("#btn-save");
 
 let currentType = "retoure";
@@ -765,15 +898,23 @@ async function getTextFromFile(file) {
   const ocrDataUrl = await resizeImage(file, 1500, 0.9);
   const worker = await getOcrWorker();
   const { data } = await worker.recognize(ocrDataUrl);
-  return (data && data.text) || "";
+  return { text: (data && data.text) || "", lines: linesFromTesseractData(data) };
+}
+
+function setOcrStatus(state, text) {
+  // state: "loading" | "success" | "neutral"
+  ocrStatus.style.display = "flex";
+  ocrStatus.className = `fw-ocr-status is-${state}`;
+  ocrSpinner.style.display = state === "loading" ? "block" : "none";
+  ocrStatusText.textContent = text;
 }
 
 async function runOcr(file) {
-  ocrStatus.style.display = "block";
-  ocrStatus.style.color = "var(--slate)";
-  ocrStatus.textContent = file.type === "application/pdf" ? "PDF wird gelesen …" : "Beleg wird gelesen …";
+  // Deutlich sichtbarer Hinweis, solange der Scan läuft — leicht zu
+  // übersehen, wenn es nur ein kleiner grauer Text ist.
+  setOcrStatus("loading", file.type === "application/pdf" ? "PDF wird gelesen …" : "Beleg wird gelesen …");
   try {
-    const text = await getTextFromFile(file);
+    const { text, lines } = await getTextFromFile(file);
     const applied = [];
 
     if (!dateTouched) {
@@ -792,10 +933,13 @@ async function runOcr(file) {
         applied.push("Betrag");
       }
     }
+    // Anbieter/Absender: bevorzugt die Kopfzeile mit der größten Schrift
+    // bzw. oben rechts im Beleg (Positions-/Größenanalyse), sonst die
+    // erste plausible Textzeile als Rückfallebene.
+    const headerGuess = guessHeaderCandidate(lines) || guessMerchant(text);
     if (!produktTouched && !produktInput.value.trim()) {
-      const merchant = guessMerchant(text);
-      if (merchant) {
-        produktInput.value = merchant;
+      if (headerGuess) {
+        produktInput.value = headerGuess;
         saveBtn.disabled = false;
         applied.push("Anbieter");
       }
@@ -816,7 +960,11 @@ async function runOcr(file) {
         }
       }
       if (!empfaengerTouched) {
-        const recipient = parseRecipientFromText(text) || produktInput.value.trim() || null;
+        // Gleiches Verfahren wie beim Anbieter: erst explizites Stichwort
+        // ("Zahlungsempfänger", "Kontoinhaber" …), sonst dieselbe
+        // Kopfzeilen-Erkennung, sonst als letzte Rückfallebene das bereits
+        // erkannte Anbieter-Feld.
+        const recipient = parseRecipientFromText(text) || headerGuess || produktInput.value.trim() || null;
         if (recipient) {
           empfaengerInput.value = recipient;
           applied.push("Zahlungsempfänger");
@@ -825,15 +973,12 @@ async function runOcr(file) {
     }
 
     if (applied.length) {
-      ocrStatus.style.color = "var(--green)";
-      ocrStatus.textContent = `Aus dem Beleg erkannt: ${applied.join(", ")} — bitte prüfen.`;
+      setOcrStatus("success", `Aus dem Beleg erkannt: ${applied.join(", ")} — bitte prüfen.`);
     } else {
-      ocrStatus.style.color = "var(--slate)";
-      ocrStatus.textContent = "Im Beleg konnte nichts Eindeutiges erkannt werden.";
+      setOcrStatus("neutral", "Im Beleg konnte nichts Eindeutiges erkannt werden.");
     }
   } catch (e) {
-    ocrStatus.style.color = "var(--slate)";
-    ocrStatus.textContent = "Texterkennung nicht verfügbar (evtl. kein Internet beim ersten Mal nötig).";
+    setOcrStatus("neutral", "Texterkennung nicht verfügbar (evtl. kein Internet beim ersten Mal nötig).");
   }
 }
 function showFileRow() {
@@ -894,24 +1039,32 @@ const viewerBox = $("#fw-viewer-content");
 function openViewer(beleg) {
   currentBeleg = beleg;
   viewerBox.innerHTML = "";
-  if (beleg.dataUrl) {
-    if (beleg.mime === "application/pdf") {
-      const iframe = document.createElement("iframe");
-      iframe.src = beleg.dataUrl;
-      iframe.style.width = "80vw";
-      iframe.style.height = "78vh";
-      iframe.style.border = "none";
-      viewerBox.appendChild(iframe);
-    } else {
-      const img = document.createElement("img");
-      img.src = beleg.dataUrl;
-      img.className = "fw-viewer-img";
-      viewerBox.appendChild(img);
-    }
+  // Sicherheit: nicht dem separat mitgeführten "mime"-Feld vertrauen (das
+  // könnte bei einem importierten Backup manipuliert sein), sondern den
+  // echten Anfang der Data-URL selbst prüfen. Zusätzlich läuft der
+  // PDF-Viewer in einem "sandbox"-iframe ohne Skriptrechte.
+  const isRealPdf = typeof beleg.dataUrl === "string" && beleg.dataUrl.startsWith("data:application/pdf");
+  const isRealImage = typeof beleg.dataUrl === "string" && /^data:image\/(png|jpe?g|webp|gif);base64,/.test(beleg.dataUrl);
+
+  if (isRealPdf) {
+    const iframe = document.createElement("iframe");
+    iframe.src = beleg.dataUrl;
+    iframe.style.width = "80vw";
+    iframe.style.height = "78vh";
+    iframe.style.border = "none";
+    iframe.setAttribute("sandbox", ""); // keine Skriptausführung, keine Formulare, keine Navigation
+    viewerBox.appendChild(iframe);
+  } else if (isRealImage) {
+    const img = document.createElement("img");
+    img.src = beleg.dataUrl;
+    img.className = "fw-viewer-img";
+    viewerBox.appendChild(img);
   } else {
     const p = document.createElement("p");
     p.style.padding = "20px";
-    p.textContent = `Datei zu groß für die lokale Vorschau: ${beleg.name}`;
+    p.textContent = beleg.dataUrl
+      ? "Diese Datei kann aus Sicherheitsgründen nicht angezeigt werden."
+      : `Datei zu groß für die lokale Vorschau: ${beleg.name}`;
     viewerBox.appendChild(p);
   }
   viewerOverlay.style.display = "flex";
@@ -1003,7 +1156,7 @@ document.addEventListener("visibilitychange", () => {
    Browsers — das Passwort verlässt nie das Gerät. */
 
 const BACKUP_APP_ID = "fristen-waechter";
-const PBKDF2_ITERATIONS = 200000;
+const PBKDF2_ITERATIONS = 600000; // OWASP-Empfehlung (Stand 2026) für PBKDF2-HMAC-SHA256
 
 function bufToBase64(buf) {
   let binary = "";
@@ -1219,6 +1372,14 @@ $("#import-confirm").addEventListener("click", async () => {
       importedEntries = importWrapper.data;
     }
     if (!Array.isArray(importedEntries)) throw new Error("Ungültiges Format");
+    // Sicherheit: jeden Eintrag auf eine bekannte, feste Form zurechtstutzen,
+    // statt beliebige Felder/Werte aus der Datei ungeprüft zu übernehmen.
+    const before = importedEntries.length;
+    importedEntries = importedEntries.filter((e) => e && typeof e === "object" && typeof e.id === "string").map(sanitizeImportedEntry);
+    if (importedEntries.length < before) {
+      importInfo.style.display = "block";
+      importInfo.textContent = `${before - importedEntries.length} Eintrag/Einträge übersprungen (ungültiges Format).`;
+    }
     importInfo.style.display = "block";
     importInfo.textContent = `${importedEntries.length} Eintrag/Einträge bereit zur Wiederherstellung.`;
     importInitialActions.style.display = "none";
@@ -1424,22 +1585,59 @@ function generateLetterPdf(entry) {
    verlinkt statt Zahlen zu kopieren. */
 
 const KNOWN_PROVIDERS = [
-  { match: ["netflix"], name: "Netflix", url: "https://www.netflix.com/de/" },
-  { match: ["disney"], name: "Disney+", url: "https://www.disneyplus.com/de-de" },
-  { match: ["amazon prime", "prime video"], name: "Amazon Prime Video", url: "https://www.primevideo.com/" },
-  { match: ["spotify"], name: "Spotify", url: "https://www.spotify.com/de/premium/" },
-  { match: ["dazn"], name: "DAZN", url: "https://www.dazn.com/de-DE/welcome" },
-  { match: ["sky", "wow"], name: "WOW (ehem. Sky Ticket)", url: "https://www.wow.de/" },
-  { match: ["apple tv"], name: "Apple TV+", url: "https://www.apple.com/de/apple-tv-plus/" },
-  { match: ["youtube premium", "youtube music"], name: "YouTube Premium", url: "https://www.youtube.com/premium" },
-  { match: ["audible"], name: "Audible", url: "https://www.audible.de/" },
-  { match: ["paramount"], name: "Paramount+", url: "https://www.paramountplus.com/de/" },
-  { match: ["magenta"], name: "MagentaTV", url: "https://www.telekom.de/magenta-tv" },
-  { match: ["joyn"], name: "Joyn", url: "https://www.joyn.de/" },
+  { match: ["netflix"], name: "Netflix", url: "https://www.netflix.com/de/", category: "streaming" },
+  { match: ["disney"], name: "Disney+", url: "https://www.disneyplus.com/de-de", category: "streaming" },
+  { match: ["amazon prime", "prime video"], name: "Amazon Prime Video", url: "https://www.primevideo.com/", category: "streaming" },
+  { match: ["spotify"], name: "Spotify", url: "https://www.spotify.com/de/premium/", category: "streaming" },
+  { match: ["dazn"], name: "DAZN", url: "https://www.dazn.com/de-DE/welcome", category: "streaming" },
+  { match: ["sky", "wow"], name: "WOW (ehem. Sky Ticket)", url: "https://www.wow.de/", category: "streaming" },
+  { match: ["apple tv"], name: "Apple TV+", url: "https://www.apple.com/de/apple-tv-plus/", category: "streaming" },
+  { match: ["youtube premium", "youtube music"], name: "YouTube Premium", url: "https://www.youtube.com/premium", category: "streaming" },
+  { match: ["audible"], name: "Audible", url: "https://www.audible.de/", category: "streaming" },
+  { match: ["paramount"], name: "Paramount+", url: "https://www.paramountplus.com/de/", category: "streaming" },
+  { match: ["magenta"], name: "MagentaTV", url: "https://www.telekom.de/magenta-tv", category: "streaming" },
+  { match: ["joyn"], name: "Joyn", url: "https://www.joyn.de/", category: "streaming" },
+  { match: ["vodafone"], name: "Vodafone", url: "https://www.vodafone.de/", category: "mobilfunk" },
+  { match: ["telekom", "t-mobile"], name: "Telekom", url: "https://www.telekom.de/mobilfunk", category: "mobilfunk" },
+  { match: ["o2", "telefónica", "telefonica"], name: "o2", url: "https://www.o2online.de/", category: "mobilfunk" },
+  { match: ["1&1", "1&amp;1"], name: "1&1", url: "https://www.1und1.de/", category: "mobilfunk" },
+  { match: ["congstar"], name: "congstar", url: "https://www.congstar.de/", category: "mobilfunk" },
 ];
 function matchKnownProvider(produktName) {
   const lower = produktName.toLowerCase();
   return KNOWN_PROVIDERS.find((p) => p.match.some((m) => lower.includes(m))) || null;
+}
+
+// Verivox/Check24 sind riesige Portale mit vielen Sparten (Strom, DSL,
+// Mobilfunk, Streaming, Versicherung …) — ein einzelner fest verdrahteter
+// Link passt fast nie zum tatsächlichen Abo. Deshalb wird hier erst die
+// Kategorie des Eintrags bestimmt (über den erkannten Anbieter oder über
+// Schlüsselwörter im Titel) und nur bei einer Kategorie mit verifizierter
+// Vergleichsseite werden Verivox/Check24 überhaupt angezeigt. Ohne
+// eindeutige Kategorie bleibt nur die Google-Suche übrig, statt einen
+// falschen Vergleichslink zu zeigen.
+const CATEGORY_KEYWORDS = {
+  mobilfunk: ["mobilfunk", "handyvertrag", "handytarif", "sim-only", "sim only", "prepaid"],
+};
+const CATEGORY_PORTALS = {
+  streaming: {
+    subLabel: "Streaming-Vergleich",
+    verivoxUrl: "https://www.verivox.de/streaming/angebote/",
+    check24Url: "https://www.check24.de/internet/streaming/",
+  },
+  mobilfunk: {
+    subLabel: "Mobilfunk-Vergleich",
+    verivoxUrl: "https://www.verivox.de/handy/mobilfunk/",
+    check24Url: "https://handytarife.check24.de/",
+  },
+};
+function detectCategory(produktName, provider) {
+  if (provider) return provider.category;
+  const lower = produktName.toLowerCase();
+  for (const [cat, keywords] of Object.entries(CATEGORY_KEYWORDS)) {
+    if (keywords.some((k) => lower.includes(k))) return cat;
+  }
+  return null;
 }
 
 const compareOverlay = $("#compare-overlay");
@@ -1468,7 +1666,7 @@ function makeCompareButton({ label, sub, url }) {
   btn.appendChild(left);
   btn.appendChild(arrow);
   btn.addEventListener("click", () => {
-    window.open(url, "_blank", "noopener");
+    window.open(url, "_blank", "noopener,noreferrer");
   });
   return btn;
 }
@@ -1479,9 +1677,8 @@ function makeCompareButton({ label, sub, url }) {
 // dadurch immer aktuell.
 function openComparePopup(entry) {
   const provider = matchKnownProvider(entry.produkt);
+  const category = detectCategory(entry.produkt, provider);
   const searchUrl = `https://www.google.com/search?q=${encodeURIComponent("günstigere Alternative zu " + entry.produkt)}`;
-  const verivoxUrl = "https://www.verivox.de/streaming/angebote/";
-  const check24Url = "https://www.check24.de/internet/streaming/";
 
   compareSubtitle.textContent = `Für: ${entry.produkt}`;
   compareButtonsWrap.innerHTML = "";
@@ -1491,12 +1688,15 @@ function openComparePopup(entry) {
       makeCompareButton({ label: provider.name, sub: "Offizielle Seite – aktuelle Tarife/Pakete", url: provider.url })
     );
   }
-  compareButtonsWrap.appendChild(
-    makeCompareButton({ label: "Verivox", sub: "Unabhängiger Streaming-Vergleich", url: verivoxUrl })
-  );
-  compareButtonsWrap.appendChild(
-    makeCompareButton({ label: "Check24", sub: "Unabhängiger Streaming-Vergleich", url: check24Url })
-  );
+  const portals = category ? CATEGORY_PORTALS[category] : null;
+  if (portals) {
+    compareButtonsWrap.appendChild(
+      makeCompareButton({ label: "Verivox", sub: `Unabhängiger ${portals.subLabel}`, url: portals.verivoxUrl })
+    );
+    compareButtonsWrap.appendChild(
+      makeCompareButton({ label: "Check24", sub: `Unabhängiger ${portals.subLabel}`, url: portals.check24Url })
+    );
+  }
   compareButtonsWrap.appendChild(
     makeCompareButton({ label: "Google-Suche", sub: `"Günstigere Alternative zu ${entry.produkt}"`, url: searchUrl })
   );
