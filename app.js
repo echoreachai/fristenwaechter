@@ -481,15 +481,22 @@ const STORAGE_KEY = "fw_entries";
 const NOTIFIED_KEY = "fw_notified_on";
 const SENDER_KEY = "fw_sender";
 
+function stripSensitiveEntryFields(entry) {
+  if (!entry || typeof entry !== "object") return entry;
+  return { ...entry, iban: "" };
+}
+
 function loadEntries() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.map(stripSensitiveEntryFields) : [];
   } catch (e) { return []; }
 }
 function saveEntries(entries) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+    const persistedEntries = Array.isArray(entries) ? entries.map(stripSensitiveEntryFields) : [];
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(persistedEntries));
     return true;
   } catch (e) {
     showError("Speichern fehlgeschlagen (evtl. Speicher voll). Alte Belege ggf. löschen.");
@@ -1038,19 +1045,56 @@ form.addEventListener("submit", (e) => {
 
 const viewerOverlay = $("#fw-viewer-overlay");
 const viewerBox = $("#fw-viewer-content");
+let currentViewerObjectUrl = null;
+function sanitizePreviewDataUrl(value) {
+  if (typeof value !== "string") return null;
+  if (!value.startsWith("data:")) return null;
+  const m = value.match(/^data:([^;,]+);base64,([A-Za-z0-9+/=]+)$/);
+  if (!m) return null;
+  const mime = m[1].toLowerCase();
+  if (!["application/pdf", "image/png", "image/jpeg", "image/webp", "image/gif"].includes(mime)) return null;
+  return value;
+}
+function dataUrlToObjectUrl(dataUrl) {
+  const m = dataUrl.match(/^data:([^;,]+);base64,([A-Za-z0-9+/=]+)$/);
+  if (!m) return null;
+  const mime = m[1].toLowerCase();
+  const base64 = m[2];
+  let bin;
+  try {
+    bin = atob(base64);
+  } catch (_) {
+    return null;
+  }
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const blob = new Blob([bytes], { type: mime });
+  return URL.createObjectURL(blob);
+}
+function clearViewerObjectUrl() {
+  if (currentViewerObjectUrl) {
+    URL.revokeObjectURL(currentViewerObjectUrl);
+    currentViewerObjectUrl = null;
+  }
+}
 function openViewer(beleg) {
   currentBeleg = beleg;
+  clearViewerObjectUrl();
   viewerBox.innerHTML = "";
   // Sicherheit: nicht dem separat mitgeführten "mime"-Feld vertrauen (das
   // könnte bei einem importierten Backup manipuliert sein), sondern den
   // echten Anfang der Data-URL selbst prüfen. Zusätzlich läuft der
   // PDF-Viewer in einem "sandbox"-iframe ohne Skriptrechte.
-  const isRealPdf = typeof beleg.dataUrl === "string" && beleg.dataUrl.startsWith("data:application/pdf");
-  const isRealImage = typeof beleg.dataUrl === "string" && /^data:image\/(png|jpe?g|webp|gif);base64,/.test(beleg.dataUrl);
+  const safeDataUrl = sanitizePreviewDataUrl(beleg.dataUrl);
+  const isRealPdf = typeof safeDataUrl === "string" && safeDataUrl.startsWith("data:application/pdf;base64,");
+  const isRealImage = typeof safeDataUrl === "string" && /^data:image\/(png|jpeg|webp|gif);base64,/.test(safeDataUrl);
 
   if (isRealPdf) {
     const iframe = document.createElement("iframe");
-    iframe.src = beleg.dataUrl;
+    const objectUrl = dataUrlToObjectUrl(safeDataUrl);
+    if (!objectUrl) throw new Error("Ungültige Datei für Vorschau");
+    currentViewerObjectUrl = objectUrl;
+    iframe.src = objectUrl;
     iframe.style.width = "80vw";
     iframe.style.height = "78vh";
     iframe.style.border = "none";
@@ -1058,7 +1102,10 @@ function openViewer(beleg) {
     viewerBox.appendChild(iframe);
   } else if (isRealImage) {
     const img = document.createElement("img");
-    img.src = beleg.dataUrl;
+    const objectUrl = dataUrlToObjectUrl(safeDataUrl);
+    if (!objectUrl) throw new Error("Ungültige Datei für Vorschau");
+    currentViewerObjectUrl = objectUrl;
+    img.src = objectUrl;
     img.className = "fw-viewer-img";
     viewerBox.appendChild(img);
   } else {
