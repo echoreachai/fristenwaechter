@@ -483,7 +483,8 @@ const SENDER_KEY = "fw_sender";
 
 function stripSensitiveEntryFields(entry) {
   if (!entry || typeof entry !== "object") return entry;
-  return { ...entry, iban: "" };
+  const { iban, ...safeEntry } = entry;
+  return safeEntry;
 }
 
 function loadEntries() {
