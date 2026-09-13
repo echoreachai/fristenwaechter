@@ -483,8 +483,21 @@ const SENDER_KEY = "fw_sender";
 
 function stripSensitiveEntryFields(entry) {
   if (!entry || typeof entry !== "object") return entry;
-  const { iban, ...safeEntry } = entry;
-  return safeEntry;
+  return {
+    id: entry.id,
+    type: entry.type,
+    produkt: entry.produkt,
+    erhalten: entry.erhalten,
+    deadline: entry.deadline,
+    betrag: entry.betrag,
+    notiz: entry.notiz,
+    referenz: entry.referenz,
+    adresse: entry.adresse,
+    empfaenger: entry.empfaenger,
+    beleg: entry.beleg,
+    status: entry.status,
+    createdAt: entry.createdAt,
+  };
 }
 
 function loadEntries() {
