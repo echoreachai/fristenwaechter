@@ -228,24 +228,6 @@ body{
   font-family: var(--font-body);
 }
 
-.fw-search-row{
-  display: flex;
-  gap: 8px;
-  padding: 0 20px 14px;
-}
-.fw-search-row #search-input{
-  flex: 1;
-  min-width: 0;
-  padding: 8px 11px;
-  font-size: 13px;
-}
-.fw-search-row #sort-select{
-  flex-shrink: 0;
-  max-width: 42%;
-  padding: 8px 8px;
-  font-size: 12px;
-}
-
 .fw-list{
   padding: 4px 20px 90px;
   display: flex;

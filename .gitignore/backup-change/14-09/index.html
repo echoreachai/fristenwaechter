@@ -25,8 +25,8 @@
       <div class="fw-menu-wrap">
         <button class="fw-menu-btn" id="btn-menu" aria-label="Menü" aria-haspopup="true" aria-expanded="false">⋮</button>
         <div class="fw-menu-dropdown" id="menu-dropdown" style="display:none">
-          <button class="fw-menu-item" id="menu-export">📤 Backup exportieren</button>
-          <button class="fw-menu-item" id="menu-import">📥 Backup importieren</button>
+          <button class="fw-menu-item" id="menu-export">⭳ Backup exportieren</button>
+          <button class="fw-menu-item" id="menu-import">⭱ Backup importieren</button>
           <button class="fw-menu-item" id="menu-sender">👤 Absenderdaten</button>
           <button class="fw-menu-item" id="menu-feedback">💬 Feedback senden</button>
         </div>
@@ -69,16 +69,6 @@
     <button class="fw-add-btn" id="btn-add">+ Neue Frist</button>
   </div>
 
-  <div class="fw-search-row">
-    <input type="search" class="fw-input" id="search-input" placeholder="Suchen (Titel, Notiz, Referenz) …" />
-    <select class="fw-input" id="sort-select">
-      <option value="deadline-asc">Frist: bald zuerst</option>
-      <option value="deadline-desc">Frist: spät zuerst</option>
-      <option value="created-desc">Zuletzt hinzugefügt</option>
-      <option value="alpha">Alphabetisch (A–Z)</option>
-    </select>
-  </div>
-
   <div class="fw-list" id="fw-list"></div>
 
   <button class="fw-fab" id="fab-add" aria-label="Neue Frist hinzufügen">+</button>
@@ -96,7 +86,6 @@
             <div class="fw-type-opt" data-type="abo">Abo-Kündigung</div>
             <div class="fw-type-opt" data-type="strafzettel">Strafzettel</div>
             <div class="fw-type-opt" data-type="rechnung">Offene Rechnung</div>
-            <div class="fw-type-opt" data-type="sonstiges" style="grid-column: span 2">Sonstiges</div>
           </div>
         </div>
 
@@ -139,12 +128,6 @@
           <label class="fw-label" for="input-rechnung">Fälligkeitsdatum</label>
           <input type="date" class="fw-input" id="input-rechnung" />
           <p class="fw-hint">Letzter Tag, an dem die Rechnung bezahlt sein muss.</p>
-        </div>
-
-        <div class="fw-field" id="field-sonstiges" style="display:none">
-          <label class="fw-label" for="input-sonstiges">Frist / Stichtag</label>
-          <input type="date" class="fw-input" id="input-sonstiges" />
-          <p class="fw-hint">Für alles, was in keine der anderen Kategorien passt.</p>
         </div>
 
         <div class="fw-field">

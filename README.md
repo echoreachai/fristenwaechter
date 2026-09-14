@@ -258,6 +258,31 @@ Datei exportieren und auf einem anderen Gerät wieder importieren.
   daher eine sichere Verbindung — funktioniert automatisch, sobald die App
   über HTTPS läuft (z. B. via GitHub Pages).
 
+## Menü-Symbole (Android-Kompatibilität)
+
+Die Symbole für "Backup exportieren"/"Backup importieren" im Menü nutzten
+zwei seltene Pfeil-Sonderzeichen, die auf Android-Systemschriften oft
+nicht dargestellt werden (leeres Kästchen), auf dem Desktop-Browser aber
+schon (breitere Symbol-Schriftarten-Unterstützung). Auf die Standard-Emoji
+📤/📥 umgestellt, die auf allen Plattformen zuverlässig dargestellt
+werden — dieselben, die auch sonst im Menü verwendet werden.
+
+## Suche & Sortierung
+
+Unter den Filter-Reitern (Aktiv/Erledigt/Alle) gibt es jetzt ein Suchfeld
+(durchsucht Titel, Notiz und Referenznummer) sowie eine Sortierauswahl:
+Frist bald/spät zuerst, zuletzt hinzugefügt, oder alphabetisch. Hilfreich,
+um bei vielen älteren Einträgen schnell etwas wiederzufinden — z. B. wenn
+nicht mehr sicher ist, ob ein bestimmter Eintrag schon erledigt wurde.
+
+## Kategorie "Sonstiges"
+
+Fünfte Kategorie für alles, was in keine der anderen vier passt — mit
+einem einfachen Frist-/Stichtag-Feld und optionaler Referenznummer.
+Bekommt (anders als Abo/Strafzettel) keinen Kündigungs-/Einspruchsbrief
+und keinen Alternativen-Vergleich, da diese Funktionen kategoriespezifisch
+sind.
+
 ## Kategorien
 
 - **Widerruf / Retoure** — Erhalten-Datum eintragen, 14-Tage-Frist wird automatisch berechnet.
