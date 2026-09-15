@@ -1092,6 +1092,41 @@ function sanitizeImageDataUrl(value) {
   const mime = m[1].toLowerCase();
   const b64 = m[2].replace(/\s+/g, "");
   if (!b64 || b64.length % 4 !== 0) return null;
+
+  let bin;
+  try {
+    bin = atob(b64);
+  } catch (_) {
+    return null;
+  }
+  if (!bin || bin.length < 4) return null;
+
+  const hasPngSig =
+    bin.length >= 8 &&
+    bin.charCodeAt(0) === 0x89 &&
+    bin.charCodeAt(1) === 0x50 &&
+    bin.charCodeAt(2) === 0x4E &&
+    bin.charCodeAt(3) === 0x47 &&
+    bin.charCodeAt(4) === 0x0D &&
+    bin.charCodeAt(5) === 0x0A &&
+    bin.charCodeAt(6) === 0x1A &&
+    bin.charCodeAt(7) === 0x0A;
+  const hasJpegSig =
+    bin.length >= 3 &&
+    bin.charCodeAt(0) === 0xFF &&
+    bin.charCodeAt(1) === 0xD8 &&
+    bin.charCodeAt(2) === 0xFF;
+  const hasGifSig = bin.startsWith("GIF87a") || bin.startsWith("GIF89a");
+  const hasWebpSig =
+    bin.length >= 12 &&
+    bin.startsWith("RIFF") &&
+    bin.slice(8, 12) === "WEBP";
+
+  if (mime === "png" && !hasPngSig) return null;
+  if ((mime === "jpg" || mime === "jpeg") && !hasJpegSig) return null;
+  if (mime === "gif" && !hasGifSig) return null;
+  if (mime === "webp" && !hasWebpSig) return null;
+
   return `data:image/${mime};base64,${b64}`;
 }
 function openViewer(beleg) {
