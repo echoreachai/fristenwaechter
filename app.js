@@ -1085,6 +1085,15 @@ form.addEventListener("submit", (e) => {
 
 const viewerOverlay = $("#fw-viewer-overlay");
 const viewerBox = $("#fw-viewer-content");
+function sanitizeImageDataUrl(value) {
+  if (typeof value !== "string") return null;
+  const m = value.match(/^data:image\/(png|jpe?g|webp|gif);base64,([A-Za-z0-9+/=\r\n]+)$/i);
+  if (!m) return null;
+  const mime = m[1].toLowerCase();
+  const b64 = m[2].replace(/\s+/g, "");
+  if (!b64 || b64.length % 4 !== 0) return null;
+  return `data:image/${mime};base64,${b64}`;
+}
 function openViewer(beleg) {
   currentBeleg = beleg;
   viewerBox.innerHTML = "";
@@ -1093,7 +1102,8 @@ function openViewer(beleg) {
   // echten Anfang der Data-URL selbst prüfen. Zusätzlich läuft der
   // PDF-Viewer in einem "sandbox"-iframe ohne Skriptrechte.
   const isRealPdf = typeof beleg.dataUrl === "string" && beleg.dataUrl.startsWith("data:application/pdf");
-  const isRealImage = typeof beleg.dataUrl === "string" && /^data:image\/(png|jpe?g|webp|gif);base64,/.test(beleg.dataUrl);
+  const safeImageDataUrl = sanitizeImageDataUrl(beleg.dataUrl);
+  const isRealImage = !!safeImageDataUrl;
 
   if (isRealPdf) {
     const iframe = document.createElement("iframe");
@@ -1105,7 +1115,7 @@ function openViewer(beleg) {
     viewerBox.appendChild(iframe);
   } else if (isRealImage) {
     const img = document.createElement("img");
-    img.src = beleg.dataUrl;
+    img.src = safeImageDataUrl;
     img.className = "fw-viewer-img";
     viewerBox.appendChild(img);
   } else {
