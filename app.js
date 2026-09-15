@@ -485,16 +485,93 @@ function formatEuro(amount) {
 const STORAGE_KEY = "fw_entries";
 const NOTIFIED_KEY = "fw_notified_on";
 const SENDER_KEY = "fw_sender";
+const STORAGE_ENC_META = "__enc_v1__";
 
-function loadEntries() {
+let storagePassphraseCache = null;
+
+function toBase64(bytes) {
+  let binary = "";
+  const arr = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  for (let i = 0; i < arr.length; i++) binary += String.fromCharCode(arr[i]);
+  return btoa(binary);
+}
+function fromBase64(base64) {
+  const binary = atob(base64);
+  const out = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+  return out;
+}
+async function getStoragePassphrase() {
+  if (storagePassphraseCache) return storagePassphraseCache;
+  const pw = window.prompt("Passphrase zum Schutz sensibler Daten eingeben:");
+  if (!pw) throw new Error("Keine Passphrase angegeben.");
+  storagePassphraseCache = pw;
+  return pw;
+}
+async function deriveStorageKey(passphrase, saltBytes) {
+  const enc = new TextEncoder();
+  const keyMaterial = await crypto.subtle.importKey("raw", enc.encode(passphrase), "PBKDF2", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt: saltBytes, iterations: 120000, hash: "SHA-256" },
+    keyMaterial,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+async function encryptText(plainText) {
+  const enc = new TextEncoder();
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const passphrase = await getStoragePassphrase();
+  const key = await deriveStorageKey(passphrase, salt);
+  const cipherBuf = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, enc.encode(plainText));
+  return {
+    v: 1,
+    iv: toBase64(iv),
+    salt: toBase64(salt),
+    data: toBase64(new Uint8Array(cipherBuf)),
+  };
+}
+async function decryptText(payload) {
+  const dec = new TextDecoder();
+  const iv = fromBase64(payload.iv);
+  const salt = fromBase64(payload.salt);
+  const data = fromBase64(payload.data);
+  const passphrase = await getStoragePassphrase();
+  const key = await deriveStorageKey(passphrase, salt);
+  const plainBuf = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, data);
+  return dec.decode(plainBuf);
+}
+async function protectEntryForStorage(entry) {
+  if (!entry || typeof entry !== "object") return entry;
+  if (!entry.iban || typeof entry.iban !== "string") return entry;
+  const encrypted = await encryptText(entry.iban);
+  return { ...entry, iban: { [STORAGE_ENC_META]: true, ...encrypted } };
+}
+async function unprotectEntryFromStorage(entry) {
+  if (!entry || typeof entry !== "object") return entry;
+  const iban = entry.iban;
+  if (!iban || typeof iban !== "object" || iban[STORAGE_ENC_META] !== true) return entry;
+  const plain = await decryptText(iban);
+  return { ...entry, iban: plain };
+}
+
+async function loadEntries() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
+    const parsed = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return [];
+    const out = [];
+    for (const e of parsed) out.push(await unprotectEntryFromStorage(e));
+    return out;
   } catch (e) { return []; }
 }
-function saveEntries(entries) {
+async function saveEntries(entries) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+    const toStore = [];
+    for (const e of entries) toStore.push(await protectEntryForStorage(e));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(toStore));
     return true;
   } catch (e) {
     showError("Speichern fehlgeschlagen (evtl. Speicher voll). Alte Belege ggf. löschen.");
@@ -700,7 +777,7 @@ function renderCard(entry) {
 
   card.querySelector('[data-action="toggle"]').addEventListener("click", () => {
     entry.status = entry.status === "erledigt" ? "aktiv" : "erledigt";
-    saveEntries(entries);
+    void saveEntries(entries);
     render();
   });
   const viewBtn = card.querySelector('[data-action="view"]');
@@ -1499,7 +1576,7 @@ $("#import-replace").addEventListener("click", () => {
 });
 function persistAndReload(next, message) {
   entries = next;
-  saveEntries(entries);
+  void saveEntries(entries);
   render();
   checkAndNotify(true);
   importOverlay.style.display = "none";
