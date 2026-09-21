@@ -448,18 +448,6 @@ function sanitizeImportedEntry(raw) {
   const str = (v, max) => (typeof v === "string" ? v.slice(0, max || 500) : "");
   const num = (v) => (typeof v === "number" && isFinite(v) ? v : null);
   const type = Object.keys(TYPE_META).includes(raw.type) ? raw.type : "retoure";
-  // Eine IBAN kann entweder ein Klartext-String sein oder (bei einem noch
-  // gesperrten Eintrag) das verschlüsselte Objekt — beide Formen bleiben
-  // erhalten, statt eine gesperrte IBAN beim Import stillschweigend zu
-  // verlieren.
-  const sanitizeIban = (v) => {
-    if (typeof v === "string") return v.slice(0, 40);
-    if (v && typeof v === "object" && v[STORAGE_ENC_META] === true
-      && typeof v.iv === "string" && typeof v.salt === "string" && typeof v.data === "string") {
-      return { [STORAGE_ENC_META]: true, v: 1, iv: v.iv.slice(0, 100), salt: v.salt.slice(0, 100), data: v.data.slice(0, 5000) };
-    }
-    return "";
-  };
   let beleg = null;
   if (raw.beleg && typeof raw.beleg === "object") {
     const dataUrl = typeof raw.beleg.dataUrl === "string" ? raw.beleg.dataUrl : null;
@@ -481,7 +469,7 @@ function sanitizeImportedEntry(raw) {
     referenz: str(raw.referenz, 100),
     adresse: str(raw.adresse, 500),
     empfaenger: str(raw.empfaenger, 200),
-    iban: sanitizeIban(raw.iban),
+    iban: str(raw.iban, 40),
     beleg,
     status: raw.status === "erledigt" ? "erledigt" : "aktiv",
     createdAt: str(raw.createdAt, 40) || new Date().toISOString(),
@@ -498,16 +486,8 @@ const STORAGE_KEY = "fw_entries";
 const NOTIFIED_KEY = "fw_notified_on";
 const SENDER_KEY = "fw_sender";
 const STORAGE_ENC_META = "__enc_v1__";
-// "Gesperrt" wird aus der tatsächlichen Form von entry.iban abgeleitet
-// (noch verschlüsseltes Objekt vs. entschlüsselter String), nicht nur aus
-// einem separaten Flag — das bleibt so auch nach einem Import korrekt,
-// bei dem ein noch gesperrter Eintrag enthalten war.
-function isIbanLocked(entry) {
-  return !!(entry && entry.iban && typeof entry.iban === "object" && entry.iban[STORAGE_ENC_META] === true);
-}
 
 let storagePassphraseCache = null;
-let storagePassphraseDeclined = false; // verhindert wiederholtes Nachfragen in derselben Sitzung, wenn einmal abgebrochen
 
 function toBase64(bytes) {
   let binary = "";
@@ -521,49 +501,10 @@ function fromBase64(base64) {
   for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
   return out;
 }
-
-// Eigener, zur restlichen App passender Dialog statt window.prompt() — läuft
-// als Promise, damit er sich in die async Ver-/Entschlüsselung einfügt.
-const passphraseOverlay = $("#passphrase-overlay");
-const passphraseInput = $("#passphrase-input");
-const passphraseError = $("#passphrase-error");
-let passphraseResolver = null;
-function promptForPassphrase() {
-  return new Promise((resolve) => {
-    passphraseResolver = resolve;
-    passphraseInput.value = "";
-    passphraseError.style.display = "none";
-    passphraseOverlay.style.display = "flex";
-    passphraseInput.focus();
-  });
-}
-function resolvePassphrasePrompt(value) {
-  passphraseOverlay.style.display = "none";
-  if (passphraseResolver) {
-    passphraseResolver(value);
-    passphraseResolver = null;
-  }
-}
-$("#passphrase-confirm").addEventListener("click", () => {
-  const val = passphraseInput.value;
-  if (!val) {
-    passphraseError.textContent = "Bitte ein Passwort eingeben.";
-    passphraseError.style.display = "block";
-    return;
-  }
-  resolvePassphrasePrompt(val);
-});
-$("#passphrase-cancel").addEventListener("click", () => resolvePassphrasePrompt(null));
-passphraseOverlay.addEventListener("mousedown", (e) => { if (e.target === passphraseOverlay) resolvePassphrasePrompt(null); });
-
 async function getStoragePassphrase() {
   if (storagePassphraseCache) return storagePassphraseCache;
-  if (storagePassphraseDeclined) throw new Error("Keine Passphrase angegeben.");
-  const pw = await promptForPassphrase();
-  if (!pw) {
-    storagePassphraseDeclined = true;
-    throw new Error("Keine Passphrase angegeben.");
-  }
+  const pw = window.prompt("Passphrase zum Schutz sensibler Daten eingeben:");
+  if (!pw) throw new Error("Keine Passphrase angegeben.");
   storagePassphraseCache = pw;
   return pw;
 }
@@ -571,9 +512,7 @@ async function deriveStorageKey(passphrase, saltBytes) {
   const enc = new TextEncoder();
   const keyMaterial = await crypto.subtle.importKey("raw", enc.encode(passphrase), "PBKDF2", false, ["deriveKey"]);
   return crypto.subtle.deriveKey(
-    // Dieselbe Rundenzahl wie beim Backup-Export (siehe PBKDF2_ITERATIONS
-    // weiter unten) — ein Passwort verdient überall denselben Schutz.
-    { name: "PBKDF2", salt: saltBytes, iterations: PBKDF2_ITERATIONS, hash: "SHA-256" },
+    { name: "PBKDF2", salt: saltBytes, iterations: 120000, hash: "SHA-256" },
     keyMaterial,
     { name: "AES-GCM", length: 256 },
     false,
@@ -607,32 +546,15 @@ async function decryptText(payload) {
 async function protectEntryForStorage(entry) {
   if (!entry || typeof entry !== "object") return entry;
   if (!entry.iban || typeof entry.iban !== "string") return entry;
-  try {
-    const encrypted = await encryptText(entry.iban);
-    return { ...entry, iban: { [STORAGE_ENC_META]: true, ...encrypted } };
-  } catch (e) {
-    // Kein Passwort angegeben: IBAN bleibt für diesen Speichervorgang
-    // unverschlüsselt, statt den ganzen Eintrag zu verwerfen.
-    return entry;
-  }
+  const encrypted = await encryptText(entry.iban);
+  return { ...entry, iban: { [STORAGE_ENC_META]: true, ...encrypted } };
 }
-// Gibt bei Fehlschlag (falsches/abgebrochenes Passwort, beschädigte Daten)
-// den Eintrag MIT verschlüsselt gebliebener IBAN zurück, statt einen Fehler
-// zu werfen — ein einzelner Entschlüsselungsfehler darf nie die restliche
-// Liste zum Verschwinden bringen.
 async function unprotectEntryFromStorage(entry) {
   if (!entry || typeof entry !== "object") return entry;
   const iban = entry.iban;
   if (!iban || typeof iban !== "object" || iban[STORAGE_ENC_META] !== true) return entry;
-  try {
-    const plain = await decryptText(iban);
-    return { ...entry, iban: plain };
-  } catch (e) {
-    // Verschlüsselte Form NICHT verwerfen — sonst geht sie beim nächsten
-    // Speichern (z. B. durch Bearbeiten eines anderen Eintrags) verloren,
-    // nur weil einmal ein falsches Passwort eingegeben oder abgebrochen wurde.
-    return { ...entry, iban };
-  }
+  const plain = await decryptText(iban);
+  return { ...entry, iban: plain };
 }
 
 async function loadEntries() {
@@ -641,13 +563,7 @@ async function loadEntries() {
     const parsed = raw ? JSON.parse(raw) : [];
     if (!Array.isArray(parsed)) return [];
     const out = [];
-    for (const e of parsed) {
-      try {
-        out.push(await unprotectEntryFromStorage(e));
-      } catch (err) {
-        out.push(e); // Im Zweifel den Eintrag unverändert behalten statt zu verlieren.
-      }
-    }
+    for (const e of parsed) out.push(await unprotectEntryFromStorage(e));
     return out;
   } catch (e) { return []; }
 }
@@ -672,7 +588,7 @@ function saveSenderData(sender) {
   localStorage.setItem(SENDER_KEY, JSON.stringify(sender));
 }
 
-let entries = [];
+let entries = loadEntries();
 let filter = "aktiv";
 let searchQuery = "";
 let sortMode = "deadline-asc";
@@ -842,8 +758,7 @@ function renderCard(entry) {
         ${entry.type === "abo" ? `<button class="fw-action" data-action="letter">Kündigung erstellen</button>` : ""}
         ${entry.type === "abo" ? `<button class="fw-action" data-action="compare">Alternativen vergleichen</button>` : ""}
         ${entry.type === "strafzettel" ? `<button class="fw-action" data-action="letter">Einspruch erstellen</button>` : ""}
-        ${entry.type === "rechnung" && entry.iban && !isIbanLocked(entry) ? `<button class="fw-action" data-action="copy-iban">IBAN kopieren</button>` : ""}
-        ${entry.type === "rechnung" && isIbanLocked(entry) ? `<button class="fw-action" data-action="unlock-iban">🔒 IBAN entsperren</button>` : ""}
+        ${entry.type === "rechnung" && entry.iban ? `<button class="fw-action" data-action="copy-iban">IBAN kopieren</button>` : ""}
         <button class="fw-action danger" data-action="delete">Löschen</button>
       </div>
     </div>
@@ -857,9 +772,7 @@ function renderCard(entry) {
   if (entry.notiz) card.querySelector(".fw-notiz").textContent = entry.notiz;
   const ibanLine = card.querySelector("#iban-line");
   if (ibanLine) {
-    ibanLine.textContent = isIbanLocked(entry)
-      ? `${entry.empfaenger ? entry.empfaenger + " · " : ""}🔒 IBAN gespeichert, aber gesperrt (Passwort erforderlich)`
-      : `${entry.empfaenger ? entry.empfaenger + " · " : ""}${entry.iban}`;
+    ibanLine.textContent = `${entry.empfaenger ? entry.empfaenger + " · " : ""}${entry.iban}`;
   }
 
   card.querySelector('[data-action="toggle"]').addEventListener("click", () => {
@@ -885,24 +798,10 @@ function renderCard(entry) {
       }
     });
   }
-  const unlockIbanBtn = card.querySelector('[data-action="unlock-iban"]');
-  if (unlockIbanBtn) {
-    unlockIbanBtn.addEventListener("click", async () => {
-      storagePassphraseDeclined = false; // erneuten Versuch erlauben
-      try {
-        const plain = await decryptText(entry.iban);
-        entry.iban = plain;
-        render();
-      } catch (e) {
-        // Passwort weiterhin falsch/abgebrochen — Eintrag bleibt unverändert
-        // gesperrt, nichts geht dabei verloren.
-      }
-    });
-  }
   card.querySelector('[data-action="delete"]').addEventListener("click", () => {
     if (!confirm(`"${entry.produkt}" wirklich löschen?`)) return;
     entries = entries.filter((e) => e.id !== entry.id);
-    void saveEntries(entries);
+    saveEntries(entries);
     render();
   });
 
@@ -1231,7 +1130,7 @@ $("#fab-add").addEventListener("click", openModal);
 $("#btn-cancel").addEventListener("click", closeModal);
 overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) closeModal(); });
 
-form.addEventListener("submit", async (e) => {
+form.addEventListener("submit", (e) => {
   e.preventDefault();
   if (!produktInput.value.trim()) return;
   const deadline = currentDeadline();
@@ -1252,7 +1151,7 @@ form.addEventListener("submit", async (e) => {
     createdAt: new Date().toISOString(),
   };
   entries.unshift(entry);
-  if (await saveEntries(entries)) {
+  if (saveEntries(entries)) {
     closeModal();
     render();
     checkAndNotify(true);
@@ -1988,13 +1887,6 @@ if ("serviceWorker" in navigator) {
 
 /* ---------- Start ---------- */
 
-// Wichtig: loadEntries() ist async (wegen der IBAN-Entschlüsselung) und
-// liefert ein Promise zurück — vorher wurde "entries" fälschlich direkt
-// auf dieses Promise gesetzt, wodurch die ganze Listenanzeige kaputt war.
-async function bootstrap() {
-  entries = await loadEntries();
-  updateNotifBanner();
-  render();
-  checkAndNotify();
-}
-bootstrap();
+updateNotifBanner();
+render();
+checkAndNotify();
