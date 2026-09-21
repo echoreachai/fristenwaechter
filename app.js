@@ -448,18 +448,6 @@ function sanitizeImportedEntry(raw) {
   const str = (v, max) => (typeof v === "string" ? v.slice(0, max || 500) : "");
   const num = (v) => (typeof v === "number" && isFinite(v) ? v : null);
   const type = Object.keys(TYPE_META).includes(raw.type) ? raw.type : "retoure";
-  // Eine IBAN kann entweder ein Klartext-String sein oder (bei einem noch
-  // gesperrten Eintrag) das verschlüsselte Objekt — beide Formen bleiben
-  // erhalten, statt eine gesperrte IBAN beim Import stillschweigend zu
-  // verlieren.
-  const sanitizeIban = (v) => {
-    if (typeof v === "string") return v.slice(0, 40);
-    if (v && typeof v === "object" && v[STORAGE_ENC_META] === true
-      && typeof v.iv === "string" && typeof v.salt === "string" && typeof v.data === "string") {
-      return { [STORAGE_ENC_META]: true, v: 1, iv: v.iv.slice(0, 100), salt: v.salt.slice(0, 100), data: v.data.slice(0, 5000) };
-    }
-    return "";
-  };
   let beleg = null;
   if (raw.beleg && typeof raw.beleg === "object") {
     const dataUrl = typeof raw.beleg.dataUrl === "string" ? raw.beleg.dataUrl : null;
@@ -481,7 +469,7 @@ function sanitizeImportedEntry(raw) {
     referenz: str(raw.referenz, 100),
     adresse: str(raw.adresse, 500),
     empfaenger: str(raw.empfaenger, 200),
-    iban: sanitizeIban(raw.iban),
+    iban: str(raw.iban, 40),
     beleg,
     status: raw.status === "erledigt" ? "erledigt" : "aktiv",
     createdAt: str(raw.createdAt, 40) || new Date().toISOString(),
@@ -497,152 +485,16 @@ function formatEuro(amount) {
 const STORAGE_KEY = "fw_entries";
 const NOTIFIED_KEY = "fw_notified_on";
 const SENDER_KEY = "fw_sender";
-const STORAGE_ENC_META = "__enc_v1__";
-// "Gesperrt" wird aus der tatsächlichen Form von entry.iban abgeleitet
-// (noch verschlüsseltes Objekt vs. entschlüsselter String), nicht nur aus
-// einem separaten Flag — das bleibt so auch nach einem Import korrekt,
-// bei dem ein noch gesperrter Eintrag enthalten war.
-function isIbanLocked(entry) {
-  return !!(entry && entry.iban && typeof entry.iban === "object" && entry.iban[STORAGE_ENC_META] === true);
-}
 
-let storagePassphraseCache = null;
-let storagePassphraseDeclined = false; // verhindert wiederholtes Nachfragen in derselben Sitzung, wenn einmal abgebrochen
-
-function toBase64(bytes) {
-  let binary = "";
-  const arr = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-  for (let i = 0; i < arr.length; i++) binary += String.fromCharCode(arr[i]);
-  return btoa(binary);
-}
-function fromBase64(base64) {
-  const binary = atob(base64);
-  const out = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
-  return out;
-}
-
-// Dialog läuft als Promise, damit er sich in die async
-// Ver-/Entschlüsselung einfügt (DOM-Verdrahtung folgt weiter unten,
-// nachdem der $-Selektor-Helfer definiert ist).
-let passphraseResolver = null;
-function promptForPassphrase() {
-  return new Promise((resolve) => {
-    passphraseResolver = resolve;
-    passphraseInput.value = "";
-    passphraseError.style.display = "none";
-    passphraseOverlay.style.display = "flex";
-    passphraseInput.focus();
-  });
-}
-function resolvePassphrasePrompt(value) {
-  passphraseOverlay.style.display = "none";
-  if (passphraseResolver) {
-    passphraseResolver(value);
-    passphraseResolver = null;
-  }
-}
-
-async function getStoragePassphrase() {
-  if (storagePassphraseCache) return storagePassphraseCache;
-  if (storagePassphraseDeclined) throw new Error("Keine Passphrase angegeben.");
-  const pw = await promptForPassphrase();
-  if (!pw) {
-    storagePassphraseDeclined = true;
-    throw new Error("Keine Passphrase angegeben.");
-  }
-  storagePassphraseCache = pw;
-  return pw;
-}
-async function deriveStorageKey(passphrase, saltBytes) {
-  const enc = new TextEncoder();
-  const keyMaterial = await crypto.subtle.importKey("raw", enc.encode(passphrase), "PBKDF2", false, ["deriveKey"]);
-  return crypto.subtle.deriveKey(
-    // Dieselbe Rundenzahl wie beim Backup-Export (siehe PBKDF2_ITERATIONS
-    // weiter unten) — ein Passwort verdient überall denselben Schutz.
-    { name: "PBKDF2", salt: saltBytes, iterations: PBKDF2_ITERATIONS, hash: "SHA-256" },
-    keyMaterial,
-    { name: "AES-GCM", length: 256 },
-    false,
-    ["encrypt", "decrypt"]
-  );
-}
-async function encryptText(plainText) {
-  const enc = new TextEncoder();
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const passphrase = await getStoragePassphrase();
-  const key = await deriveStorageKey(passphrase, salt);
-  const cipherBuf = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, enc.encode(plainText));
-  return {
-    v: 1,
-    iv: toBase64(iv),
-    salt: toBase64(salt),
-    data: toBase64(new Uint8Array(cipherBuf)),
-  };
-}
-async function decryptText(payload) {
-  const dec = new TextDecoder();
-  const iv = fromBase64(payload.iv);
-  const salt = fromBase64(payload.salt);
-  const data = fromBase64(payload.data);
-  const passphrase = await getStoragePassphrase();
-  const key = await deriveStorageKey(passphrase, salt);
-  const plainBuf = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, data);
-  return dec.decode(plainBuf);
-}
-async function protectEntryForStorage(entry) {
-  if (!entry || typeof entry !== "object") return entry;
-  if (!entry.iban || typeof entry.iban !== "string") return entry;
-  try {
-    const encrypted = await encryptText(entry.iban);
-    return { ...entry, iban: { [STORAGE_ENC_META]: true, ...encrypted } };
-  } catch (e) {
-    // Kein Passwort angegeben: IBAN bleibt für diesen Speichervorgang
-    // unverschlüsselt, statt den ganzen Eintrag zu verwerfen.
-    return entry;
-  }
-}
-// Gibt bei Fehlschlag (falsches/abgebrochenes Passwort, beschädigte Daten)
-// den Eintrag MIT verschlüsselt gebliebener IBAN zurück, statt einen Fehler
-// zu werfen — ein einzelner Entschlüsselungsfehler darf nie die restliche
-// Liste zum Verschwinden bringen.
-async function unprotectEntryFromStorage(entry) {
-  if (!entry || typeof entry !== "object") return entry;
-  const iban = entry.iban;
-  if (!iban || typeof iban !== "object" || iban[STORAGE_ENC_META] !== true) return entry;
-  try {
-    const plain = await decryptText(iban);
-    return { ...entry, iban: plain };
-  } catch (e) {
-    // Verschlüsselte Form NICHT verwerfen — sonst geht sie beim nächsten
-    // Speichern (z. B. durch Bearbeiten eines anderen Eintrags) verloren,
-    // nur weil einmal ein falsches Passwort eingegeben oder abgebrochen wurde.
-    return { ...entry, iban };
-  }
-}
-
-async function loadEntries() {
+function loadEntries() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    if (!Array.isArray(parsed)) return [];
-    const out = [];
-    for (const e of parsed) {
-      try {
-        out.push(await unprotectEntryFromStorage(e));
-      } catch (err) {
-        out.push(e); // Im Zweifel den Eintrag unverändert behalten statt zu verlieren.
-      }
-    }
-    return out;
+    return raw ? JSON.parse(raw) : [];
   } catch (e) { return []; }
 }
-async function saveEntries(entries) {
+function saveEntries(entries) {
   try {
-    const toStore = [];
-    for (const e of entries) toStore.push(await protectEntryForStorage(e));
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(toStore));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
     return true;
   } catch (e) {
     showError("Speichern fehlgeschlagen (evtl. Speicher voll). Alte Belege ggf. löschen.");
@@ -659,7 +511,7 @@ function saveSenderData(sender) {
   localStorage.setItem(SENDER_KEY, JSON.stringify(sender));
 }
 
-let entries = [];
+let entries = loadEntries();
 let filter = "aktiv";
 let searchQuery = "";
 let sortMode = "deadline-asc";
@@ -829,8 +681,7 @@ function renderCard(entry) {
         ${entry.type === "abo" ? `<button class="fw-action" data-action="letter">Kündigung erstellen</button>` : ""}
         ${entry.type === "abo" ? `<button class="fw-action" data-action="compare">Alternativen vergleichen</button>` : ""}
         ${entry.type === "strafzettel" ? `<button class="fw-action" data-action="letter">Einspruch erstellen</button>` : ""}
-        ${entry.type === "rechnung" && entry.iban && !isIbanLocked(entry) ? `<button class="fw-action" data-action="copy-iban">IBAN kopieren</button>` : ""}
-        ${entry.type === "rechnung" && isIbanLocked(entry) ? `<button class="fw-action" data-action="unlock-iban">🔒 IBAN entsperren</button>` : ""}
+        ${entry.type === "rechnung" && entry.iban ? `<button class="fw-action" data-action="copy-iban">IBAN kopieren</button>` : ""}
         <button class="fw-action danger" data-action="delete">Löschen</button>
       </div>
     </div>
@@ -844,14 +695,12 @@ function renderCard(entry) {
   if (entry.notiz) card.querySelector(".fw-notiz").textContent = entry.notiz;
   const ibanLine = card.querySelector("#iban-line");
   if (ibanLine) {
-    ibanLine.textContent = isIbanLocked(entry)
-      ? `${entry.empfaenger ? entry.empfaenger + " · " : ""}🔒 IBAN gespeichert, aber gesperrt (Passwort erforderlich)`
-      : `${entry.empfaenger ? entry.empfaenger + " · " : ""}${entry.iban}`;
+    ibanLine.textContent = `${entry.empfaenger ? entry.empfaenger + " · " : ""}${entry.iban}`;
   }
 
   card.querySelector('[data-action="toggle"]').addEventListener("click", () => {
     entry.status = entry.status === "erledigt" ? "aktiv" : "erledigt";
-    void saveEntries(entries);
+    saveEntries(entries);
     render();
   });
   const viewBtn = card.querySelector('[data-action="view"]');
@@ -872,24 +721,10 @@ function renderCard(entry) {
       }
     });
   }
-  const unlockIbanBtn = card.querySelector('[data-action="unlock-iban"]');
-  if (unlockIbanBtn) {
-    unlockIbanBtn.addEventListener("click", async () => {
-      storagePassphraseDeclined = false; // erneuten Versuch erlauben
-      try {
-        const plain = await decryptText(entry.iban);
-        entry.iban = plain;
-        render();
-      } catch (e) {
-        // Passwort weiterhin falsch/abgebrochen — Eintrag bleibt unverändert
-        // gesperrt, nichts geht dabei verloren.
-      }
-    });
-  }
   card.querySelector('[data-action="delete"]').addEventListener("click", () => {
     if (!confirm(`"${entry.produkt}" wirklich löschen?`)) return;
     entries = entries.filter((e) => e.id !== entry.id);
-    void saveEntries(entries);
+    saveEntries(entries);
     render();
   });
 
@@ -1218,7 +1053,7 @@ $("#fab-add").addEventListener("click", openModal);
 $("#btn-cancel").addEventListener("click", closeModal);
 overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) closeModal(); });
 
-form.addEventListener("submit", async (e) => {
+form.addEventListener("submit", (e) => {
   e.preventDefault();
   if (!produktInput.value.trim()) return;
   const deadline = currentDeadline();
@@ -1239,7 +1074,7 @@ form.addEventListener("submit", async (e) => {
     createdAt: new Date().toISOString(),
   };
   entries.unshift(entry);
-  if (await saveEntries(entries)) {
+  if (saveEntries(entries)) {
     closeModal();
     render();
     checkAndNotify(true);
@@ -1250,50 +1085,6 @@ form.addEventListener("submit", async (e) => {
 
 const viewerOverlay = $("#fw-viewer-overlay");
 const viewerBox = $("#fw-viewer-content");
-function sanitizeImageDataUrl(value) {
-  if (typeof value !== "string") return null;
-  const m = value.match(/^data:image\/(png|jpe?g|webp|gif);base64,([A-Za-z0-9+/=\r\n]+)$/i);
-  if (!m) return null;
-  const mime = m[1].toLowerCase();
-  const b64 = m[2].replace(/\s+/g, "");
-  if (!b64 || b64.length % 4 !== 0) return null;
-
-  let bin;
-  try {
-    bin = atob(b64);
-  } catch (_) {
-    return null;
-  }
-  if (!bin || bin.length < 4) return null;
-
-  const hasPngSig =
-    bin.length >= 8 &&
-    bin.charCodeAt(0) === 0x89 &&
-    bin.charCodeAt(1) === 0x50 &&
-    bin.charCodeAt(2) === 0x4E &&
-    bin.charCodeAt(3) === 0x47 &&
-    bin.charCodeAt(4) === 0x0D &&
-    bin.charCodeAt(5) === 0x0A &&
-    bin.charCodeAt(6) === 0x1A &&
-    bin.charCodeAt(7) === 0x0A;
-  const hasJpegSig =
-    bin.length >= 3 &&
-    bin.charCodeAt(0) === 0xFF &&
-    bin.charCodeAt(1) === 0xD8 &&
-    bin.charCodeAt(2) === 0xFF;
-  const hasGifSig = bin.startsWith("GIF87a") || bin.startsWith("GIF89a");
-  const hasWebpSig =
-    bin.length >= 12 &&
-    bin.startsWith("RIFF") &&
-    bin.slice(8, 12) === "WEBP";
-
-  if (mime === "png" && !hasPngSig) return null;
-  if ((mime === "jpg" || mime === "jpeg") && !hasJpegSig) return null;
-  if (mime === "gif" && !hasGifSig) return null;
-  if (mime === "webp" && !hasWebpSig) return null;
-
-  return `data:image/${mime};base64,${b64}`;
-}
 function openViewer(beleg) {
   currentBeleg = beleg;
   viewerBox.innerHTML = "";
@@ -1302,8 +1093,7 @@ function openViewer(beleg) {
   // echten Anfang der Data-URL selbst prüfen. Zusätzlich läuft der
   // PDF-Viewer in einem "sandbox"-iframe ohne Skriptrechte.
   const isRealPdf = typeof beleg.dataUrl === "string" && beleg.dataUrl.startsWith("data:application/pdf");
-  const safeImageDataUrl = sanitizeImageDataUrl(beleg.dataUrl);
-  const isRealImage = !!safeImageDataUrl;
+  const isRealImage = typeof beleg.dataUrl === "string" && /^data:image\/(png|jpe?g|webp|gif);base64,/.test(beleg.dataUrl);
 
   if (isRealPdf) {
     const iframe = document.createElement("iframe");
@@ -1315,7 +1105,7 @@ function openViewer(beleg) {
     viewerBox.appendChild(iframe);
   } else if (isRealImage) {
     const img = document.createElement("img");
-    img.src = safeImageDataUrl;
+    img.src = beleg.dataUrl;
     img.className = "fw-viewer-img";
     viewerBox.appendChild(img);
   } else {
@@ -1664,7 +1454,7 @@ $("#import-replace").addEventListener("click", () => {
 });
 function persistAndReload(next, message) {
   entries = next;
-  void saveEntries(entries);
+  saveEntries(entries);
   render();
   checkAndNotify(true);
   importOverlay.style.display = "none";
@@ -1712,22 +1502,6 @@ feedbackSend.addEventListener("click", () => {
     feedbackError.style.display = "block";
   }
 });
-
-/* ---- Passwort-Dialog für sensible Daten (IBAN-Verschlüsselung) ---- */
-const passphraseOverlay = $("#passphrase-overlay");
-const passphraseInput = $("#passphrase-input");
-const passphraseError = $("#passphrase-error");
-$("#passphrase-confirm").addEventListener("click", () => {
-  const val = passphraseInput.value;
-  if (!val) {
-    passphraseError.textContent = "Bitte ein Passwort eingeben.";
-    passphraseError.style.display = "block";
-    return;
-  }
-  resolvePassphrasePrompt(val);
-});
-$("#passphrase-cancel").addEventListener("click", () => resolvePassphrasePrompt(null));
-passphraseOverlay.addEventListener("mousedown", (e) => { if (e.target === passphraseOverlay) resolvePassphrasePrompt(null); });
 
 /* ---- Absenderdaten ---- */
 const senderOverlay = $("#sender-overlay");
@@ -1991,13 +1765,6 @@ if ("serviceWorker" in navigator) {
 
 /* ---------- Start ---------- */
 
-// Wichtig: loadEntries() ist async (wegen der IBAN-Entschlüsselung) und
-// liefert ein Promise zurück — vorher wurde "entries" fälschlich direkt
-// auf dieses Promise gesetzt, wodurch die ganze Listenanzeige kaputt war.
-async function bootstrap() {
-  entries = await loadEntries();
-  updateNotifBanner();
-  render();
-  checkAndNotify();
-}
-bootstrap();
+updateNotifBanner();
+render();
+checkAndNotify();
