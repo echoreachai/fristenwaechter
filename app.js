@@ -522,11 +522,9 @@ function fromBase64(base64) {
   return out;
 }
 
-// Eigener, zur restlichen App passender Dialog statt window.prompt() — läuft
-// als Promise, damit er sich in die async Ver-/Entschlüsselung einfügt.
-const passphraseOverlay = $("#passphrase-overlay");
-const passphraseInput = $("#passphrase-input");
-const passphraseError = $("#passphrase-error");
+// Dialog läuft als Promise, damit er sich in die async
+// Ver-/Entschlüsselung einfügt (DOM-Verdrahtung folgt weiter unten,
+// nachdem der $-Selektor-Helfer definiert ist).
 let passphraseResolver = null;
 function promptForPassphrase() {
   return new Promise((resolve) => {
@@ -544,17 +542,6 @@ function resolvePassphrasePrompt(value) {
     passphraseResolver = null;
   }
 }
-$("#passphrase-confirm").addEventListener("click", () => {
-  const val = passphraseInput.value;
-  if (!val) {
-    passphraseError.textContent = "Bitte ein Passwort eingeben.";
-    passphraseError.style.display = "block";
-    return;
-  }
-  resolvePassphrasePrompt(val);
-});
-$("#passphrase-cancel").addEventListener("click", () => resolvePassphrasePrompt(null));
-passphraseOverlay.addEventListener("mousedown", (e) => { if (e.target === passphraseOverlay) resolvePassphrasePrompt(null); });
 
 async function getStoragePassphrase() {
   if (storagePassphraseCache) return storagePassphraseCache;
@@ -1725,6 +1712,22 @@ feedbackSend.addEventListener("click", () => {
     feedbackError.style.display = "block";
   }
 });
+
+/* ---- Passwort-Dialog für sensible Daten (IBAN-Verschlüsselung) ---- */
+const passphraseOverlay = $("#passphrase-overlay");
+const passphraseInput = $("#passphrase-input");
+const passphraseError = $("#passphrase-error");
+$("#passphrase-confirm").addEventListener("click", () => {
+  const val = passphraseInput.value;
+  if (!val) {
+    passphraseError.textContent = "Bitte ein Passwort eingeben.";
+    passphraseError.style.display = "block";
+    return;
+  }
+  resolvePassphrasePrompt(val);
+});
+$("#passphrase-cancel").addEventListener("click", () => resolvePassphrasePrompt(null));
+passphraseOverlay.addEventListener("mousedown", (e) => { if (e.target === passphraseOverlay) resolvePassphrasePrompt(null); });
 
 /* ---- Absenderdaten ---- */
 const senderOverlay = $("#sender-overlay");
