@@ -151,41 +151,6 @@ zurückgibt. Beim Einbau von Google Play Billing (Digital Goods API) wird
 nur diese eine Funktion ausgetauscht — Feature-Gating an beliebiger
 Stelle dann einfach über `if (!isPro()) { ... }`.
 
-## Kritischer Bugfix (App war nicht funktionsfähig)
-
-Im zuletzt live stehenden Code hatte sich beim Ergänzen der IBAN-
-Verschlüsselung ein schwerwiegender Fehler eingeschlichen:
-`loadEntries()`/`saveEntries()` wurden auf `async` umgestellt, aber
-`let entries = loadEntries();` sowie `if (saveEntries(entries))` wurden
-nicht entsprechend angepasst — `entries` war dadurch ein Promise-Objekt
-statt der echten Liste, und die Erfolgsprüfung beim Speichern war immer
-"wahr", egal ob das Speichern klappte. Behoben durch einen sauberen
-async-Start (`bootstrap()`) und `await` an der einzigen Stelle, die
-wirklich vom Rückgabewert abhängt (Formular-Absenden).
-
-## IBAN-Verschlüsselung im lokalen Speicher (überarbeitet)
-
-Die IBAN wird, sofern angegeben, vor dem Speichern im Browser lokal mit
-einem selbst gewählten Passwort verschlüsselt (AES-256-GCM, PBKDF2 mit
-600.000 Runden — dieselbe Stärke wie beim Backup-Export). Gegenüber der
-ursprünglichen Umsetzung wurde dabei behoben:
-
-- **Eigener Dialog statt Browser-`prompt()`** — passt zum Rest der App
-  und lässt sich beschriften/erklären.
-- **Kein Datenverlust bei falschem/abgebrochenem Passwort**: Eine
-  IBAN, die sich nicht entschlüsseln lässt, wird als "🔒 gesperrt"
-  angezeigt (mit eigenem "Entsperren"-Button) statt die restliche Liste
-  oder die IBAN selbst zu verwerfen. Der Sperrzustand wird direkt aus der
-  Datenform abgeleitet, nicht aus einem separaten Flag, das aus dem Tritt
-  geraten könnte.
-- **Bleibt auch beim Backup-Import erhalten**: Ein noch gesperrter
-  Eintrag verliert seine verschlüsselte IBAN nicht mehr durch Export/
-  Import.
-- Wird das Passwort beim erstmaligen Speichern einer IBAN abgebrochen,
-  wird die IBAN unverschlüsselt gespeichert (besser als ein blockierter
-  Speichervorgang) — das Passwort selbst wird nirgends gespeichert, nur
-  für die laufende Sitzung im Arbeitsspeicher gemerkt.
-
 ## Sicherheit
 
 Die App wurde auf typische Web-Schwachstellen geprüft. Behoben:
