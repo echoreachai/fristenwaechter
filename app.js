@@ -485,16 +485,93 @@ function formatEuro(amount) {
 const STORAGE_KEY = "fw_entries";
 const NOTIFIED_KEY = "fw_notified_on";
 const SENDER_KEY = "fw_sender";
+const STORAGE_ENC_META = "__enc_v1__";
 
-function loadEntries() {
+let storagePassphraseCache = null;
+
+function toBase64(bytes) {
+  let binary = "";
+  const arr = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  for (let i = 0; i < arr.length; i++) binary += String.fromCharCode(arr[i]);
+  return btoa(binary);
+}
+function fromBase64(base64) {
+  const binary = atob(base64);
+  const out = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+  return out;
+}
+async function getStoragePassphrase() {
+  if (storagePassphraseCache) return storagePassphraseCache;
+  const pw = window.prompt("Passphrase zum Schutz sensibler Daten eingeben:");
+  if (!pw) throw new Error("Keine Passphrase angegeben.");
+  storagePassphraseCache = pw;
+  return pw;
+}
+async function deriveStorageKey(passphrase, saltBytes) {
+  const enc = new TextEncoder();
+  const keyMaterial = await crypto.subtle.importKey("raw", enc.encode(passphrase), "PBKDF2", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt: saltBytes, iterations: 120000, hash: "SHA-256" },
+    keyMaterial,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+async function encryptText(plainText) {
+  const enc = new TextEncoder();
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const passphrase = await getStoragePassphrase();
+  const key = await deriveStorageKey(passphrase, salt);
+  const cipherBuf = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, enc.encode(plainText));
+  return {
+    v: 1,
+    iv: toBase64(iv),
+    salt: toBase64(salt),
+    data: toBase64(new Uint8Array(cipherBuf)),
+  };
+}
+async function decryptText(payload) {
+  const dec = new TextDecoder();
+  const iv = fromBase64(payload.iv);
+  const salt = fromBase64(payload.salt);
+  const data = fromBase64(payload.data);
+  const passphrase = await getStoragePassphrase();
+  const key = await deriveStorageKey(passphrase, salt);
+  const plainBuf = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, data);
+  return dec.decode(plainBuf);
+}
+async function protectEntryForStorage(entry) {
+  if (!entry || typeof entry !== "object") return entry;
+  if (!entry.iban || typeof entry.iban !== "string") return entry;
+  const encrypted = await encryptText(entry.iban);
+  return { ...entry, iban: { [STORAGE_ENC_META]: true, ...encrypted } };
+}
+async function unprotectEntryFromStorage(entry) {
+  if (!entry || typeof entry !== "object") return entry;
+  const iban = entry.iban;
+  if (!iban || typeof iban !== "object" || iban[STORAGE_ENC_META] !== true) return entry;
+  const plain = await decryptText(iban);
+  return { ...entry, iban: plain };
+}
+
+async function loadEntries() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
+    const parsed = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return [];
+    const out = [];
+    for (const e of parsed) out.push(await unprotectEntryFromStorage(e));
+    return out;
   } catch (e) { return []; }
 }
-function saveEntries(entries) {
+async function saveEntries(entries) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+    const toStore = [];
+    for (const e of entries) toStore.push(await protectEntryForStorage(e));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(toStore));
     return true;
   } catch (e) {
     showError("Speichern fehlgeschlagen (evtl. Speicher voll). Alte Belege ggf. löschen.");
@@ -700,7 +777,7 @@ function renderCard(entry) {
 
   card.querySelector('[data-action="toggle"]').addEventListener("click", () => {
     entry.status = entry.status === "erledigt" ? "aktiv" : "erledigt";
-    saveEntries(entries);
+    void saveEntries(entries);
     render();
   });
   const viewBtn = card.querySelector('[data-action="view"]');
@@ -1085,6 +1162,50 @@ form.addEventListener("submit", (e) => {
 
 const viewerOverlay = $("#fw-viewer-overlay");
 const viewerBox = $("#fw-viewer-content");
+function sanitizeImageDataUrl(value) {
+  if (typeof value !== "string") return null;
+  const m = value.match(/^data:image\/(png|jpe?g|webp|gif);base64,([A-Za-z0-9+/=\r\n]+)$/i);
+  if (!m) return null;
+  const mime = m[1].toLowerCase();
+  const b64 = m[2].replace(/\s+/g, "");
+  if (!b64 || b64.length % 4 !== 0) return null;
+
+  let bin;
+  try {
+    bin = atob(b64);
+  } catch (_) {
+    return null;
+  }
+  if (!bin || bin.length < 4) return null;
+
+  const hasPngSig =
+    bin.length >= 8 &&
+    bin.charCodeAt(0) === 0x89 &&
+    bin.charCodeAt(1) === 0x50 &&
+    bin.charCodeAt(2) === 0x4E &&
+    bin.charCodeAt(3) === 0x47 &&
+    bin.charCodeAt(4) === 0x0D &&
+    bin.charCodeAt(5) === 0x0A &&
+    bin.charCodeAt(6) === 0x1A &&
+    bin.charCodeAt(7) === 0x0A;
+  const hasJpegSig =
+    bin.length >= 3 &&
+    bin.charCodeAt(0) === 0xFF &&
+    bin.charCodeAt(1) === 0xD8 &&
+    bin.charCodeAt(2) === 0xFF;
+  const hasGifSig = bin.startsWith("GIF87a") || bin.startsWith("GIF89a");
+  const hasWebpSig =
+    bin.length >= 12 &&
+    bin.startsWith("RIFF") &&
+    bin.slice(8, 12) === "WEBP";
+
+  if (mime === "png" && !hasPngSig) return null;
+  if ((mime === "jpg" || mime === "jpeg") && !hasJpegSig) return null;
+  if (mime === "gif" && !hasGifSig) return null;
+  if (mime === "webp" && !hasWebpSig) return null;
+
+  return `data:image/${mime};base64,${b64}`;
+}
 function openViewer(beleg) {
   currentBeleg = beleg;
   viewerBox.innerHTML = "";
@@ -1093,7 +1214,8 @@ function openViewer(beleg) {
   // echten Anfang der Data-URL selbst prüfen. Zusätzlich läuft der
   // PDF-Viewer in einem "sandbox"-iframe ohne Skriptrechte.
   const isRealPdf = typeof beleg.dataUrl === "string" && beleg.dataUrl.startsWith("data:application/pdf");
-  const isRealImage = typeof beleg.dataUrl === "string" && /^data:image\/(png|jpe?g|webp|gif);base64,/.test(beleg.dataUrl);
+  const safeImageDataUrl = sanitizeImageDataUrl(beleg.dataUrl);
+  const isRealImage = !!safeImageDataUrl;
 
   if (isRealPdf) {
     const iframe = document.createElement("iframe");
@@ -1105,7 +1227,7 @@ function openViewer(beleg) {
     viewerBox.appendChild(iframe);
   } else if (isRealImage) {
     const img = document.createElement("img");
-    img.src = beleg.dataUrl;
+    img.src = safeImageDataUrl;
     img.className = "fw-viewer-img";
     viewerBox.appendChild(img);
   } else {
@@ -1454,7 +1576,7 @@ $("#import-replace").addEventListener("click", () => {
 });
 function persistAndReload(next, message) {
   entries = next;
-  saveEntries(entries);
+  void saveEntries(entries);
   render();
   checkAndNotify(true);
   importOverlay.style.display = "none";
