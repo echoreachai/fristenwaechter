@@ -1085,15 +1085,53 @@ form.addEventListener("submit", (e) => {
 
 const viewerOverlay = $("#fw-viewer-overlay");
 const viewerBox = $("#fw-viewer-content");
+// Prüft die echten Datei-Signaturen (Magic Bytes) gängiger Bildformate,
+// statt nur dem behaupteten "data:image/..."-Präfix zu vertrauen — eine
+// über einen Backup-Import eingeschleuste, falsch benannte Datei fällt
+// damit auf. Gibt bei gültigem Bild die (ggf. bereinigte) Data-URL zurück,
+// sonst null.
+function sanitizeImageDataUrl(value) {
+  if (typeof value !== "string") return null;
+  const m = value.match(/^data:image\/(png|jpe?g|webp|gif);base64,([A-Za-z0-9+/=\r\n]+)$/i);
+  if (!m) return null;
+  const mime = m[1].toLowerCase();
+  const b64 = m[2].replace(/\s+/g, "");
+  if (!b64 || b64.length % 4 !== 0) return null;
+
+  let bin;
+  try {
+    bin = atob(b64);
+  } catch (e) {
+    return null;
+  }
+  if (!bin || bin.length < 4) return null;
+
+  const hasPngSig =
+    bin.length >= 8 &&
+    bin.charCodeAt(0) === 0x89 && bin.charCodeAt(1) === 0x50 && bin.charCodeAt(2) === 0x4e && bin.charCodeAt(3) === 0x47 &&
+    bin.charCodeAt(4) === 0x0d && bin.charCodeAt(5) === 0x0a && bin.charCodeAt(6) === 0x1a && bin.charCodeAt(7) === 0x0a;
+  const hasJpegSig = bin.length >= 3 && bin.charCodeAt(0) === 0xff && bin.charCodeAt(1) === 0xd8 && bin.charCodeAt(2) === 0xff;
+  const hasGifSig = bin.startsWith("GIF87a") || bin.startsWith("GIF89a");
+  const hasWebpSig = bin.length >= 12 && bin.startsWith("RIFF") && bin.slice(8, 12) === "WEBP";
+
+  if (mime === "png" && !hasPngSig) return null;
+  if ((mime === "jpg" || mime === "jpeg") && !hasJpegSig) return null;
+  if (mime === "gif" && !hasGifSig) return null;
+  if (mime === "webp" && !hasWebpSig) return null;
+
+  return `data:image/${mime};base64,${b64}`;
+}
+
 function openViewer(beleg) {
   currentBeleg = beleg;
   viewerBox.innerHTML = "";
-  // Sicherheit: nicht dem separat mitgeführten "mime"-Feld vertrauen (das
-  // könnte bei einem importierten Backup manipuliert sein), sondern den
-  // echten Anfang der Data-URL selbst prüfen. Zusätzlich läuft der
-  // PDF-Viewer in einem "sandbox"-iframe ohne Skriptrechte.
+  // Sicherheit: nicht dem behaupteten Data-URL-Präfix allein vertrauen —
+  // die echten Datei-Signaturen (Magic Bytes) der gängigen Bildformate
+  // prüfen. Der PDF-Viewer läuft zusätzlich in einem "sandbox"-iframe
+  // ohne Skriptrechte.
   const isRealPdf = typeof beleg.dataUrl === "string" && beleg.dataUrl.startsWith("data:application/pdf");
-  const isRealImage = typeof beleg.dataUrl === "string" && /^data:image\/(png|jpe?g|webp|gif);base64,/.test(beleg.dataUrl);
+  const safeImageDataUrl = sanitizeImageDataUrl(beleg.dataUrl);
+  const isRealImage = safeImageDataUrl !== null;
 
   if (isRealPdf) {
     const iframe = document.createElement("iframe");
@@ -1105,7 +1143,7 @@ function openViewer(beleg) {
     viewerBox.appendChild(iframe);
   } else if (isRealImage) {
     const img = document.createElement("img");
-    img.src = beleg.dataUrl;
+    img.src = safeImageDataUrl;
     img.className = "fw-viewer-img";
     viewerBox.appendChild(img);
   } else {

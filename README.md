@@ -153,6 +153,39 @@ Stelle dann einfach über `if (!isPro()) { ... }`.
 
 ## Sicherheit
 
+**Erneuter Scan nach Wiederherstellung des Stands vom 14.09.:** Alle
+vorherigen Fixes (gepatchtes pdf.js, SRI-Prüfung, PDF-Viewer-Sandbox,
+Typ-Whitelist gegen XSS beim Backup-Import, 600.000 PBKDF2-Runden,
+`noopener/noreferrer`) sind intakt. Neu ergänzt:
+
+- **Bild-Signatur-Prüfung**: Hochgeladene/importierte Bilder werden jetzt
+  anhand der echten Datei-Signatur (Magic Bytes: PNG/JPEG/GIF/WEBP)
+  geprüft statt nur anhand des behaupteten Datei-Präfixes.
+
+**Noch offen (bewusst nicht automatisch eingebaut):** Eine
+Content-Security-Policy wäre ein sinnvoller nächster Schritt, braucht
+aber sorgfältiges Testen — insbesondere `worker-src` muss die
+CDN-Domain enthalten, sonst bleibt die Texterkennung (Tesseract.js)
+lautlos hängen. Vorschlag für die `<meta>`-Zeile in `index.html`:
+
+```html
+<meta http-equiv="Content-Security-Policy" content="
+  default-src 'self';
+  script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net;
+  worker-src 'self' blob: https://cdn.jsdelivr.net;
+  connect-src 'self' https://cdn.jsdelivr.net;
+  style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+  font-src https://fonts.gstatic.com;
+  img-src 'self' data:;
+  frame-src 'self' data:;
+  object-src 'none';
+  base-uri 'self';
+">
+```
+
+Vor dem Einbau unbedingt im Staging-Repo den kompletten Foto-/PDF-Scan
+einmal durchtesten.
+
 Die App wurde auf typische Web-Schwachstellen geprüft. Behoben:
 
 - **pdf.js CVE-2024-4367** (Ausführung von beliebigem JavaScript über ein
