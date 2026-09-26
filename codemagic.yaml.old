@@ -1,0 +1,64 @@
+workflows:
+  ios-capacitor-build:
+    name: iOS Capacitor Build
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    integrations:
+      app_store_connect: WT4F3M4Q2T
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.echoreach.fristenwaechter
+      vars:
+        XCODE_PROJECT: "ios/App/App.xcodeproj"
+        XCODE_SCHEME: "App"
+      node: latest
+      xcode: latest
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: main
+          include: true
+    scripts:
+      - name: Install npm dependencies
+        script: |
+          npm install
+
+      # Kein separater Web-Build-Schritt noetig: die PWA ist statisches
+      # HTML/CSS/JS im Repo-Root (index.html, app.js, styles.css), es gibt
+      # keinen Bundler/Build-Prozess. "npx cap sync" nimmt die Dateien
+      # direkt aus webDir (siehe capacitor.config.json).
+
+      - name: Sync Capacitor iOS platform
+        script: |
+          npx cap sync ios
+
+      # Kein "pod install" noetig: Capacitor 8 nutzt Swift Package Manager
+      # (siehe ios/App/CapApp-SPM), es gibt kein Podfile in diesem Projekt.
+
+      - name: Set up code signing settings
+        script: |
+          xcode-project use-profiles
+
+      - name: Increment build number
+        script: |
+          cd $CM_BUILD_DIR/ios/App
+          agvtool new-version -all $(($(app-store-connect get-latest-app-store-build-number "$APP_STORE_CONNECT_APPLICATION_ID") + 1))
+
+      - name: Build ipa for distribution
+        script: |
+          xcode-project build-ipa \
+            --project "$XCODE_PROJECT" \
+            --scheme "$XCODE_SCHEME"
+
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+      - $HOME/Library/Developer/Xcode/DerivedData/**/Build/**/*.dSYM
+
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+        # submit_to_app_store: true   # erst aktivieren, wenn direkt zur Review eingereicht werden soll
