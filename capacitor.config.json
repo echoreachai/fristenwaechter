@@ -1,5 +1,5 @@
 {
   "appId": "com.echoreach.fristenwaechter",
   "appName": "Fristen-Wächter",
-  "webDir": "."
+  "webDir": "www"
 }
