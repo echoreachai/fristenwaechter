@@ -5,7 +5,7 @@ workflows:
     instance_type: mac_mini_m2
 
     integrations:
-      app_store_connect: WT4F3M4Q2T
+      app_store_connect: GMA9HWZAQY
 
     environment:
       ios_signing:
