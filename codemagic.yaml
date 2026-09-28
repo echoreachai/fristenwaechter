@@ -5,18 +5,19 @@ workflows:
     instance_type: mac_mini_m2
 
     integrations:
-      app_store_connect: A7Y6Q4TYBX
+      # Muss EXAKT der Name sein, den du dem API-Key in Codemagic gegeben hast
+      # (Team settings > Integrations > Developer Portal > Manage keys)
+      app_store_connect: GMA9HWZAQY
 
     environment:
       ios_signing:
         distribution_type: app_store
         bundle_identifier: com.echoreach.fristenwaechter
-
       vars:
         XCODE_PROJECT: "ios/App/App.xcodeproj"
         XCODE_SCHEME: "App"
-        node: latest
-        xcode: latest
+      node: latest
+      xcode: latest
 
     triggering:
       events:
@@ -27,35 +28,36 @@ workflows:
 
     scripts:
       - name: Install npm dependencies
-        script: |
-          npm install
+        script: npm ci || npm install
 
-      - name: Prepare static PWA for Capacitor
+      - name: Prepare static PWA for Capacitor (www)
         script: |
-          mkdir -p www
-          cp -R index.html www/
-          cp -R app.js www/
-          cp -R styles.css www/
-          # Falls du weitere Dateien hast:
-          # cp -R assets www/
+          rm -rf www && mkdir -p www
+          cp index.html app.js styles.css sw.js manifest.json datenschutz.html impressum.html www/
+          cp -R icons www/
 
-      - name: Sync Capacitor
-        script: |
-          npx cap sync ios
+      - name: Sync Capacitor iOS platform
+        script: npx cap sync ios
 
-      - name: Build iOS project
-        script: |
-          xcodebuild \
-            -project "$XCODE_PROJECT" \
-            -scheme "$XCODE_SCHEME" \
-            -configuration Release \
-            -archivePath build/App.xcarchive \
-            archive
+      - name: Set up code signing settings
+        script: xcode-project use-profiles
 
-      - name: Export IPA
+      - name: Set build number
         script: |
-          xcodebuild \
-            -exportArchive \
-            -archivePath build/App.xcarchive \
-            -exportOptionsPlist exportOptions.plist \
-            -exportPath build
+          cd ios/App
+          agvtool new-version -all "$BUILD_NUMBER"
+
+      - name: Build ipa for distribution
+        script: |
+          xcode-project build-ipa \
+            --project "$XCODE_PROJECT" \
+            --scheme "$XCODE_SCHEME"
+
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
