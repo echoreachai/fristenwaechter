@@ -7,7 +7,7 @@ workflows:
     integrations:
       # Muss EXAKT der Name sein, den du dem API-Key in Codemagic gegeben hast
       # (Team settings > Integrations > Developer Portal > Manage keys)
-      app_store_connect: GMA9HWZAQY
+      app_store_connect: FristenWaechter
 
     environment:
       ios_signing:
