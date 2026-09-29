@@ -450,13 +450,15 @@ function sanitizeImportedEntry(raw) {
   const type = Object.keys(TYPE_META).includes(raw.type) ? raw.type : "retoure";
   let beleg = null;
   if (raw.beleg && typeof raw.beleg === "object") {
-    const dataUrl = typeof raw.beleg.dataUrl === "string" ? raw.beleg.dataUrl : null;
-    const validDataUrl = dataUrl && /^data:(application\/pdf|image\/(png|jpe?g|webp|gif));base64,/.test(dataUrl);
+    const validUrl = (v) => typeof v === "string" && /^data:(application\/pdf|image\/(png|jpe?g|webp|gif));base64,/.test(v);
+    const dataUrl = validUrl(raw.beleg.dataUrl) ? raw.beleg.dataUrl : null;
+    const pages = Array.isArray(raw.beleg.pages) ? raw.beleg.pages.filter(validUrl).slice(0, 20) : null;
     beleg = {
       name: str(raw.beleg.name, 200) || "Beleg",
       mime: raw.beleg.mime === "application/pdf" ? "application/pdf" : "image/jpeg",
-      dataUrl: validDataUrl ? dataUrl : null,
+      dataUrl: (pages && pages[0]) || dataUrl,
     };
+    if (pages && pages.length) beleg.pages = pages;
   }
   return {
     id: str(raw.id, 100) || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -785,6 +787,9 @@ const fileInput = $("#input-file");
 const previewLine = $("#preview-line");
 const fileRow = $("#file-row");
 const fileError = $("#file-error");
+const fileAddPageInput = $("#input-file-addpage");
+const pageThumbs = $("#page-thumbs");
+const btnAddPage = $("#btn-add-page");
 const ocrStatus = $("#ocr-status");
 const ocrSpinner = $("#ocr-spinner");
 const ocrStatusText = $("#ocr-status-text");
@@ -792,6 +797,7 @@ const saveBtn = $("#btn-save");
 
 let currentType = "retoure";
 let currentBelegDraft = null;
+let currentBelegPages = []; // mehrere Foto-Seiten desselben Belegs (nur bei Fotos, nicht bei PDF)
 // Verhindert, dass eine spät eintreffende OCR-Vermutung ein Feld
 // überschreibt, das der Mensch inzwischen selbst bearbeitet hat.
 let dateTouched = false;
@@ -800,6 +806,15 @@ let produktTouched = false;
 let referenzTouched = false;
 let ibanTouched = false;
 let empfaengerTouched = false;
+// Getrennt von "Touched": merkt sich, ob ein Feld schon durch die
+// Texterkennung EINER vorherigen Seite gefüllt wurde, damit eine weitere
+// Seite Lücken auffüllt statt einen bereits guten Treffer zu überschreiben.
+let dateAutoFilled = false;
+let betragAutoFilled = false;
+let produktAutoFilled = false;
+let referenzAutoFilled = false;
+let ibanAutoFilled = false;
+let empfaengerAutoFilled = false;
 
 const REFERENZ_LABELS = {
   abo: { label: "Kundennummer (optional)", hint: "Wird, falls angegeben, im Kündigungsschreiben genannt." },
@@ -836,12 +851,19 @@ function setVisibleFields(type) {
 function openModal() {
   currentType = "retoure";
   currentBelegDraft = null;
+  currentBelegPages = [];
   dateTouched = false;
   betragTouched = false;
   produktTouched = false;
   referenzTouched = false;
   ibanTouched = false;
   empfaengerTouched = false;
+  dateAutoFilled = false;
+  betragAutoFilled = false;
+  produktAutoFilled = false;
+  referenzAutoFilled = false;
+  ibanAutoFilled = false;
+  empfaengerAutoFilled = false;
   produktInput.value = "";
   betragInput.value = "";
   notizInput.value = "";
@@ -852,7 +874,11 @@ function openModal() {
   erhaltenInput.value = toISO(new Date());
   Object.values(DIRECT_DATE_FIELDS).forEach(({ input }) => { input.value = toISO(addDays(new Date(), 14)); });
   fileInput.value = "";
+  fileAddPageInput.value = "";
   fileRow.style.display = "none";
+  pageThumbs.style.display = "none";
+  pageThumbs.innerHTML = "";
+  btnAddPage.style.display = "none";
   fileError.style.display = "none";
   ocrStatus.style.display = "none";
   typeOpts.forEach((o) => o.classList.toggle("active", o.dataset.type === "retoure"));
@@ -909,6 +935,10 @@ fileInput.addEventListener("change", async () => {
   if (!file) return;
   fileError.style.display = "none";
   ocrStatus.style.display = "none";
+  pageThumbs.style.display = "none";
+  pageThumbs.innerHTML = "";
+  btnAddPage.style.display = "none";
+  currentBelegPages = [];
   try {
     if (file.type === "application/pdf") {
       if (file.size > 2.5 * 1024 * 1024) {
@@ -928,8 +958,11 @@ fileInput.addEventListener("change", async () => {
       runOcr(file);
     } else {
       const dataUrl = await resizeImage(file);
-      currentBelegDraft = { name: file.name, mime: "image/jpeg", dataUrl };
-      showFileRow();
+      currentBelegPages = [dataUrl];
+      currentBelegDraft = { name: file.name, mime: "image/jpeg", dataUrl, pages: currentBelegPages };
+      fileRow.style.display = "none";
+      renderPageThumbs();
+      btnAddPage.style.display = "inline-block";
       runOcr(file); // im Hintergrund, blockiert das Formular nicht
     }
   } catch (e) {
@@ -937,6 +970,82 @@ fileInput.addEventListener("change", async () => {
     fileError.style.display = "block";
   }
 });
+
+btnAddPage.addEventListener("click", () => {
+  fileAddPageInput.value = "";
+  fileAddPageInput.click();
+});
+
+const MAX_BELEG_PAGES = 10;
+
+fileAddPageInput.addEventListener("change", async () => {
+  const file = fileAddPageInput.files && fileAddPageInput.files[0];
+  if (!file) return;
+  fileError.style.display = "none";
+  if (currentBelegPages.length >= MAX_BELEG_PAGES) {
+    fileError.textContent = `Maximal ${MAX_BELEG_PAGES} Seiten pro Beleg.`;
+    fileError.style.display = "block";
+    return;
+  }
+  try {
+    const dataUrl = await resizeImage(file);
+    currentBelegPages.push(dataUrl);
+    updateBelegDraftFromPages();
+    renderPageThumbs();
+    runOcr(file); // füllt nur noch offene Lücken, siehe die *AutoFilled-Sperren in runOcr()
+  } catch (e) {
+    fileError.textContent = "Seite konnte nicht gelesen werden.";
+    fileError.style.display = "block";
+  }
+});
+
+function updateBelegDraftFromPages() {
+  currentBelegDraft = {
+    name: currentBelegPages.length > 1 ? `Beleg (${currentBelegPages.length} Seiten)` : (currentBelegDraft && currentBelegDraft.name) || "Beleg",
+    mime: "image/jpeg",
+    dataUrl: currentBelegPages[0] || null,
+    pages: currentBelegPages,
+  };
+}
+
+function renderPageThumbs() {
+  pageThumbs.innerHTML = "";
+  if (!currentBelegPages.length) {
+    pageThumbs.style.display = "none";
+    btnAddPage.style.display = "none";
+    return;
+  }
+  pageThumbs.style.display = "flex";
+  btnAddPage.style.display = currentBelegPages.length < MAX_BELEG_PAGES ? "inline-block" : "none";
+  currentBelegPages.forEach((src, idx) => {
+    const wrap = document.createElement("div");
+    wrap.className = "fw-page-thumb-wrap";
+    const img = document.createElement("img");
+    img.src = src;
+    const num = document.createElement("span");
+    num.className = "fw-page-thumb-num";
+    num.textContent = String(idx + 1);
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "fw-page-thumb-remove";
+    removeBtn.setAttribute("aria-label", "Seite entfernen");
+    removeBtn.textContent = "×";
+    removeBtn.addEventListener("click", () => {
+      currentBelegPages.splice(idx, 1);
+      if (currentBelegPages.length === 0) {
+        currentBelegDraft = null;
+        fileInput.value = "";
+      } else {
+        updateBelegDraftFromPages();
+      }
+      renderPageThumbs();
+    });
+    wrap.appendChild(img);
+    wrap.appendChild(num);
+    wrap.appendChild(removeBtn);
+    pageThumbs.appendChild(wrap);
+  });
+}
 
 // Liefert erkannten Text — aus der Textebene eines PDFs (mit OCR-Fallback
 // für gescannte PDFs) oder per Bild-OCR für Fotos.
@@ -966,19 +1075,21 @@ async function runOcr(file) {
     const { text, lines } = await getTextFromFile(file);
     const applied = [];
 
-    if (!dateTouched) {
+    if (!dateTouched && !dateAutoFilled) {
       const guessedDate = parseDateFromText(text, currentType);
       const input = activeDateInput();
       if (guessedDate && input) {
         input.value = toISO(guessedDate);
         updatePreview();
+        dateAutoFilled = true;
         applied.push("Datum");
       }
     }
-    if (!betragTouched) {
+    if (!betragTouched && !betragAutoFilled) {
       const amount = parseAmountFromText(text);
       if (amount !== null && !isNaN(amount)) {
         betragInput.value = amount.toFixed(2);
+        betragAutoFilled = true;
         applied.push("Betrag");
       }
     }
@@ -986,29 +1097,32 @@ async function runOcr(file) {
     // bzw. oben rechts im Beleg (Positions-/Größenanalyse), sonst die
     // erste plausible Textzeile als Rückfallebene.
     const headerGuess = guessHeaderCandidate(lines) || guessMerchant(text);
-    if (!produktTouched && !produktInput.value.trim()) {
+    if (!produktTouched && !produktAutoFilled && !produktInput.value.trim()) {
       if (headerGuess) {
         produktInput.value = headerGuess;
         saveBtn.disabled = false;
+        produktAutoFilled = true;
         applied.push("Anbieter");
       }
     }
-    if (!referenzTouched && (REFERENZ_LABELS[currentType])) {
+    if (!referenzTouched && !referenzAutoFilled && (REFERENZ_LABELS[currentType])) {
       const ref = parseReferenceFromText(text, currentType);
       if (ref) {
         referenzInput.value = ref;
+        referenzAutoFilled = true;
         applied.push(currentType === "rechnung" ? "Referenznummer" : currentType === "abo" ? "Kundennummer" : "Aktenzeichen");
       }
     }
     if (currentType === "rechnung") {
-      if (!ibanTouched) {
+      if (!ibanTouched && !ibanAutoFilled) {
         const iban = parseIbanFromText(text);
         if (iban) {
           ibanInput.value = formatIban(iban);
+          ibanAutoFilled = true;
           applied.push("IBAN");
         }
       }
-      if (!empfaengerTouched) {
+      if (!empfaengerTouched && !empfaengerAutoFilled) {
         // Gleiches Verfahren wie beim Anbieter: erst explizites Stichwort
         // ("Zahlungsempfänger", "Kontoinhaber" …), sonst dieselbe
         // Kopfzeilen-Erkennung, sonst als letzte Rückfallebene das bereits
@@ -1016,6 +1130,7 @@ async function runOcr(file) {
         const recipient = parseRecipientFromText(text) || headerGuess || produktInput.value.trim() || null;
         if (recipient) {
           empfaengerInput.value = recipient;
+          empfaengerAutoFilled = true;
           applied.push("Zahlungsempfänger");
         }
       }
@@ -1024,7 +1139,7 @@ async function runOcr(file) {
     if (applied.length) {
       setOcrStatus("success", `Aus dem Beleg erkannt: ${applied.join(", ")} — bitte prüfen.`);
     } else {
-      setOcrStatus("neutral", "Im Beleg konnte nichts Eindeutiges erkannt werden.");
+      setOcrStatus("neutral", "Auf dieser Seite konnte nichts Eindeutiges (mehr) erkannt werden.");
     }
   } catch (e) {
     setOcrStatus("neutral", "Texterkennung nicht verfügbar (evtl. kein Internet beim ersten Mal nötig).");
@@ -1130,8 +1245,11 @@ function openViewer(beleg) {
   // prüfen. Der PDF-Viewer läuft zusätzlich in einem "sandbox"-iframe
   // ohne Skriptrechte.
   const isRealPdf = typeof beleg.dataUrl === "string" && beleg.dataUrl.startsWith("data:application/pdf");
-  const safeImageDataUrl = sanitizeImageDataUrl(beleg.dataUrl);
-  const isRealImage = safeImageDataUrl !== null;
+  // Mehrseitige Fotobelege: jede Seite einzeln validieren, ungültige
+  // Seiten werden übersprungen statt die ganze Ansicht zu blockieren.
+  const pageList = Array.isArray(beleg.pages) && beleg.pages.length ? beleg.pages : [beleg.dataUrl];
+  const safeImagePages = pageList.map((p) => sanitizeImageDataUrl(p)).filter((p) => p !== null);
+  const isRealImage = safeImagePages.length > 0;
 
   if (isRealPdf) {
     const iframe = document.createElement("iframe");
@@ -1142,10 +1260,19 @@ function openViewer(beleg) {
     iframe.setAttribute("sandbox", ""); // keine Skriptausführung, keine Formulare, keine Navigation
     viewerBox.appendChild(iframe);
   } else if (isRealImage) {
-    const img = document.createElement("img");
-    img.src = safeImageDataUrl;
-    img.className = "fw-viewer-img";
-    viewerBox.appendChild(img);
+    const wrap = document.createElement("div");
+    wrap.style.display = "flex";
+    wrap.style.flexDirection = "column";
+    wrap.style.gap = "10px";
+    wrap.style.maxHeight = "78vh";
+    wrap.style.overflowY = "auto";
+    safeImagePages.forEach((src) => {
+      const img = document.createElement("img");
+      img.src = src;
+      img.className = "fw-viewer-img";
+      wrap.appendChild(img);
+    });
+    viewerBox.appendChild(wrap);
   } else {
     const p = document.createElement("p");
     p.style.padding = "20px";

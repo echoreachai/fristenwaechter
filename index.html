@@ -103,13 +103,16 @@
         <div class="fw-field">
           <label class="fw-label" for="input-file">📷 Beleg scannen (Foto oder PDF)</label>
           <input type="file" class="fw-input" id="input-file" accept="image/*,application/pdf" />
+          <input type="file" id="input-file-addpage" accept="image/*" style="display:none" />
+          <div class="fw-page-thumbs" id="page-thumbs" style="display:none"></div>
           <div class="fw-file-row" id="file-row" style="display:none"></div>
+          <button type="button" class="fw-action" id="btn-add-page" style="display:none;margin-top:8px">+ Weitere Seite hinzufügen</button>
           <p class="fw-hint" id="file-error" style="display:none;color:var(--red)"></p>
           <div class="fw-ocr-status" id="ocr-status" style="display:none">
             <span class="fw-ocr-spinner" id="ocr-spinner"></span>
             <span id="ocr-status-text"></span>
           </div>
-          <p class="fw-hint">Füllt Datum, Betrag & mehr automatisch aus — die restlichen Felder unten kannst du danach einfach noch prüfen.</p>
+          <p class="fw-hint">Füllt Datum, Betrag & mehr automatisch aus — die restlichen Felder unten kannst du danach einfach noch prüfen. Bei mehrseitigen Rechnungen: mehrere Fotos nacheinander hinzufügen, die Erkennung sucht dann über alle Seiten.</p>
         </div>
 
         <div class="fw-field">

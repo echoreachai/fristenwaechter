@@ -93,6 +93,26 @@ eindeutig die Gesamtsumme ("Gesamtbetrag", "Endbetrag") und überspringt
 bewusst Zwischensummen wie "Nettobetrag", damit nicht versehentlich der
 Betrag vor Mehrwertsteuer übernommen wird.
 
+## Verbesserte Erkennung (Anbieter, Zahlungsempfänger, Betrag)
+
+- **Anbieter/Zahlungsempfänger**: Die App bewertet jetzt Textzeilen im Beleg
+  nach Position und Schriftgröße statt einfach nur die erste Zeile zu
+  nehmen — Firmennamen im Briefkopf stehen meist oben rechts oder in
+  größerer Schrift, genau das wird jetzt bevorzugt erkannt. Bei
+  "Zahlungsempfänger" wird zuerst nach einem expliziten Stichwort gesucht
+  ("Zahlungsempfänger", "Kontoinhaber" …), dann dasselbe Verfahren wie beim
+  Anbieter angewandt, als letzte Rückfallebene das bereits erkannte
+  Anbieter-Feld.
+- **Betrag-Priorität**: Erkennt zuerst "Gesamtbetrag"/"Gesamtsumme", dann
+  "Überweisungsbetrag"/"zu zahlen(der Betrag)", erst danach die bisherigen,
+  allgemeineren Stichwörter.
+
+## Deutlicherer Scan-Hinweis
+
+Während ein Foto/PDF gelesen wird, zeigt die App jetzt einen auffälligen
+Hinweis mit Lade-Spinner (statt eines kleinen grauen Texthinweises) —
+leichter zu erkennen, dass die Erkennung noch läuft.
+
 ## Texterkennung (OCR) beim Foto-Upload
 
 Beim Hochladen eines Fotos (Lieferschein, Bescheid, Rechnung) liest die App
@@ -131,28 +151,89 @@ zurückgibt. Beim Einbau von Google Play Billing (Digital Goods API) wird
 nur diese eine Funktion ausgetauscht — Feature-Gating an beliebiger
 Stelle dann einfach über `if (!isPro()) { ... }`.
 
+## Sicherheit
+
+**Erneuter Scan nach Wiederherstellung des Stands vom 14.09.:** Alle
+vorherigen Fixes (gepatchtes pdf.js, SRI-Prüfung, PDF-Viewer-Sandbox,
+Typ-Whitelist gegen XSS beim Backup-Import, 600.000 PBKDF2-Runden,
+`noopener/noreferrer`) sind intakt. Neu ergänzt:
+
+- **Bild-Signatur-Prüfung**: Hochgeladene/importierte Bilder werden jetzt
+  anhand der echten Datei-Signatur (Magic Bytes: PNG/JPEG/GIF/WEBP)
+  geprüft statt nur anhand des behaupteten Datei-Präfixes.
+
+**Noch offen (bewusst nicht automatisch eingebaut):** Eine
+Content-Security-Policy wäre ein sinnvoller nächster Schritt, braucht
+aber sorgfältiges Testen — insbesondere `worker-src` muss die
+CDN-Domain enthalten, sonst bleibt die Texterkennung (Tesseract.js)
+lautlos hängen. Vorschlag für die `<meta>`-Zeile in `index.html`:
+
+```html
+<meta http-equiv="Content-Security-Policy" content="
+  default-src 'self';
+  script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net;
+  worker-src 'self' blob: https://cdn.jsdelivr.net;
+  connect-src 'self' https://cdn.jsdelivr.net;
+  style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+  font-src https://fonts.gstatic.com;
+  img-src 'self' data:;
+  frame-src 'self' data:;
+  object-src 'none';
+  base-uri 'self';
+">
+```
+
+Vor dem Einbau unbedingt im Staging-Repo den kompletten Foto-/PDF-Scan
+einmal durchtesten.
+
+Die App wurde auf typische Web-Schwachstellen geprüft. Behoben:
+
+- **pdf.js CVE-2024-4367** (Ausführung von beliebigem JavaScript über ein
+  präpariertes PDF): Bibliothek von v3.11.174 auf v4.9.155 aktualisiert
+  (dabei technisch auf ES-Module umgestellt, da neuere pdf.js-Versionen
+  keinen klassischen `<script>`-Import mehr unterstützen).
+- **Gespeichertes XSS über Backup-Import**: Ein unbekannter/manipulierter
+  `entry.type` wurde früher roh ins HTML eingesetzt. Wird jetzt immer über
+  eine feste Whitelist aufgelöst; importierte Einträge werden zusätzlich
+  komplett auf ein festes, geprüftes Feld-Schema zurechtgestutzt.
+- **PDF-Beleg-Viewer**: `iframe` läuft jetzt mit `sandbox`-Attribut (keine
+  Skriptausführung), und es wird der tatsächliche Inhalt der Datei geprüft
+  statt nur einem mitgeführten `mime`-Feld zu vertrauen.
+- **Externe Bibliotheken**: jsPDF und Tesseract.js werden jetzt mit
+  Subresource-Integrity-Prüfung (`integrity`-Attribut) geladen, sodass ein
+  kompromittiertes CDN nicht unbemerkt anderen Code ausliefern könnte.
+- **`window.open`**-Aufrufe nutzen jetzt zusätzlich zu `noopener` auch
+  `noreferrer`.
+- **Backup-Verschlüsselung**: PBKDF2-Runden von 200.000 auf 600.000 erhöht
+  (aktuelle OWASP-Empfehlung für PBKDF2-HMAC-SHA256). Bestehende Backups
+  bleiben entschlüsselbar, da jede Datei ihre eigene Rundenzahl mitführt.
+
 ## Alternativen vergleichen (bei Abo-Kündigungen)
 
 Bei Abo-Einträgen gibt es einen Button **"Alternativen vergleichen"**, der
-nur bei Klick aktiv wird (keine automatische Hintergrund-Abfrage). Er
-erzeugt eine PDF mit:
+nur bei Klick aktiv wird (keine automatische Hintergrund-Abfrage). Er öffnet
+ein Popup mit anklickbaren Optionen:
 
 - der **offiziellen Anbieter-Seite**, falls die App den Dienst erkennt
   (u. a. Netflix, Disney+, Amazon Prime Video, Spotify, DAZN, WOW, Apple
-  TV+, YouTube Premium, Audible, Paramount+, MagentaTV, Joyn),
-- den unabhängigen Vergleichsportalen **Verivox** und **Check24**,
-- einer direkten Google-Suche nach günstigeren Alternativen.
+  TV+, YouTube Premium, Audible, Paramount+, MagentaTV, Joyn, sowie die
+  Mobilfunk-Anbieter Vodafone, Telekom, o2, 1&1, congstar),
+- den unabhängigen Vergleichsportalen **Verivox** und **Check24** — aber
+  nur, wenn die Kategorie des Eintrags dazu passt (aktuell: Streaming und
+  Mobilfunk, mit jeweils verifizierten Sparten-Links). Bei anderen
+  Abo-Arten (z. B. Fitnessstudio, Versicherung, Zeitschrift) werden diese
+  beiden Buttons bewusst **nicht** angezeigt, statt einen unpassenden
+  Vergleichslink zu zeigen,
+- einer Google-Suche nach günstigeren Alternativen (Suchbegriff ist der
+  Eintragstitel) — funktioniert für jede Kategorie.
 
-Bei **unbekannten Anbietern** (kein Treffer in der Liste oben) öffnet sich
-zusätzlich sofort eine Google-Suche mit dem Eintragstitel als Suchbegriff
-in einem neuen Tab — ohne erst die PDF öffnen und den Link anklicken zu
-müssen. Die PDF wird trotzdem erzeugt, als Referenz zum Später-Nachschauen.
-
-Bewusst **keine festen Preisangaben**: Da die App keinen Server und keine
-Live-Recherche zur Laufzeit hat, würden eingebaute Preise mit der Zeit
-veraltet und potenziell falsch sein. Links dagegen bleiben aktuell, weil
-sie direkt auf die Quelle verweisen. Es handelt sich um reine Verlinkung,
-keine Affiliate-/Provisions-Links.
+Ein Klick auf eine Option öffnet die jeweilige Seite direkt in einem neuen
+Tab, die App bleibt dabei im Hintergrund offen. Bewusst **keine festen
+Preisangaben**: Da die App keinen Server und keine Live-Recherche zur
+Laufzeit hat, würden eingebaute Preise mit der Zeit veraltet und
+potenziell falsch sein. Links dagegen bleiben aktuell, weil sie direkt auf
+die Quelle verweisen. Es handelt sich um reine Verlinkung, keine
+Affiliate-/Provisions-Links.
 
 ## Kündigungs- und Einspruchsschreiben (PDF)
 
@@ -209,6 +290,31 @@ Datei exportieren und auf einem anderen Gerät wieder importieren.
 - Die Verschlüsselung nutzt die Web-Crypto-API des Browsers und benötigt
   daher eine sichere Verbindung — funktioniert automatisch, sobald die App
   über HTTPS läuft (z. B. via GitHub Pages).
+
+## Menü-Symbole (Android-Kompatibilität)
+
+Die Symbole für "Backup exportieren"/"Backup importieren" im Menü nutzten
+zwei seltene Pfeil-Sonderzeichen, die auf Android-Systemschriften oft
+nicht dargestellt werden (leeres Kästchen), auf dem Desktop-Browser aber
+schon (breitere Symbol-Schriftarten-Unterstützung). Auf die Standard-Emoji
+📤/📥 umgestellt, die auf allen Plattformen zuverlässig dargestellt
+werden — dieselben, die auch sonst im Menü verwendet werden.
+
+## Suche & Sortierung
+
+Unter den Filter-Reitern (Aktiv/Erledigt/Alle) gibt es jetzt ein Suchfeld
+(durchsucht Titel, Notiz und Referenznummer) sowie eine Sortierauswahl:
+Frist bald/spät zuerst, zuletzt hinzugefügt, oder alphabetisch. Hilfreich,
+um bei vielen älteren Einträgen schnell etwas wiederzufinden — z. B. wenn
+nicht mehr sicher ist, ob ein bestimmter Eintrag schon erledigt wurde.
+
+## Kategorie "Sonstiges"
+
+Fünfte Kategorie für alles, was in keine der anderen vier passt — mit
+einem einfachen Frist-/Stichtag-Feld und optionaler Referenznummer.
+Bekommt (anders als Abo/Strafzettel) keinen Kündigungs-/Einspruchsbrief
+und keinen Alternativen-Vergleich, da diese Funktionen kategoriespezifisch
+sind.
 
 ## Kategorien
 

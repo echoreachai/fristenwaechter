@@ -113,6 +113,22 @@ Während ein Foto/PDF gelesen wird, zeigt die App jetzt einen auffälligen
 Hinweis mit Lade-Spinner (statt eines kleinen grauen Texthinweises) —
 leichter zu erkennen, dass die Erkennung noch läuft.
 
+## Mehrseitige Belege scannen
+
+Nach dem ersten Foto erscheint ein Button **"+ Weitere Seite
+hinzufügen"** (nur bei Fotos, nicht bei PDF — ein PDF kann ja bereits von
+sich aus mehrseitig sein). Jede hinzugefügte Seite erscheint als
+Miniaturansicht mit Seitenzahl und einem "×"-Button zum Entfernen.
+Maximal 10 Seiten pro Beleg.
+
+Die Texterkennung läuft über alle Seiten hinweg zusammen: Findet Seite 1
+z. B. den Anbieter und das Datum, aber Seite 2 erst den Gesamtbetrag,
+werden beide Treffer übernommen — ein bereits gefundener Wert wird durch
+eine spätere Seite nicht mehr überschrieben, nur noch offene Felder
+werden weiter befüllt. Beim Ansehen des gespeicherten Belegs
+("Beleg ansehen") werden alle Seiten untereinander zum Scrollen
+angezeigt.
+
 ## Texterkennung (OCR) beim Foto-Upload
 
 Beim Hochladen eines Fotos (Lieferschein, Bescheid, Rechnung) liest die App
