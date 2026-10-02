@@ -160,6 +160,10 @@ const DATE_KEYWORD_TIERS_BY_TYPE = {
     ["fällig", "faellig", "frist"],
     ["rechnungsdatum", "datum"],
   ],
+  sonstiges: [
+    ["frist", "stichtag", "fällig", "faellig", "termin"],
+    ["datum"],
+  ],
 };
 
 function parseDateFromText(text, type) {
@@ -431,6 +435,7 @@ const TYPE_META = {
   abo: { label: "Abo-Kündigung" },
   strafzettel: { label: "Strafzettel" },
   rechnung: { label: "Offene Rechnung" },
+  sonstiges: { label: "Sonstiges" },
 };
 
 // Sicherheit: Einträge aus einer importierten Backup-Datei kommen von
@@ -445,13 +450,15 @@ function sanitizeImportedEntry(raw) {
   const type = Object.keys(TYPE_META).includes(raw.type) ? raw.type : "retoure";
   let beleg = null;
   if (raw.beleg && typeof raw.beleg === "object") {
-    const dataUrl = typeof raw.beleg.dataUrl === "string" ? raw.beleg.dataUrl : null;
-    const validDataUrl = dataUrl && /^data:(application\/pdf|image\/(png|jpe?g|webp|gif));base64,/.test(dataUrl);
+    const validUrl = (v) => typeof v === "string" && /^data:(application\/pdf|image\/(png|jpe?g|webp|gif));base64,/.test(v);
+    const dataUrl = validUrl(raw.beleg.dataUrl) ? raw.beleg.dataUrl : null;
+    const pages = Array.isArray(raw.beleg.pages) ? raw.beleg.pages.filter(validUrl).slice(0, 20) : null;
     beleg = {
       name: str(raw.beleg.name, 200) || "Beleg",
       mime: raw.beleg.mime === "application/pdf" ? "application/pdf" : "image/jpeg",
-      dataUrl: validDataUrl ? dataUrl : null,
+      dataUrl: (pages && pages[0]) || dataUrl,
     };
+    if (pages && pages.length) beleg.pages = pages;
   }
   return {
     id: str(raw.id, 100) || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -508,6 +515,8 @@ function saveSenderData(sender) {
 
 let entries = loadEntries();
 let filter = "aktiv";
+let searchQuery = "";
+let sortMode = "deadline-asc";
 let currentBeleg = null;
 
 /* ---------- Bild-Verkleinerung ---------- */
@@ -552,6 +561,24 @@ function showError(msg) {
   setTimeout(() => { errorBox.style.display = "none"; }, 5000);
 }
 
+function sortEntries(list, mode) {
+  const sorted = list.slice();
+  if (mode === "deadline-desc") {
+    sorted.sort((a, b) => parseISO(b.deadline) - parseISO(a.deadline));
+  } else if (mode === "created-desc") {
+    sorted.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+  } else if (mode === "alpha") {
+    sorted.sort((a, b) => a.produkt.localeCompare(b.produkt, "de", { sensitivity: "base" }));
+  } else {
+    // deadline-asc (Standard): offene Einträge zuerst nach Frist, erledigte ans Ende
+    sorted.sort((a, b) => {
+      if (a.status !== b.status) return a.status === "erledigt" ? 1 : -1;
+      return parseISO(a.deadline) - parseISO(b.deadline);
+    });
+  }
+  return sorted;
+}
+
 function render() {
   const active = entries.filter((e) => e.status !== "erledigt");
   const dringend = active.filter((e) => ["dringend", "abgelaufen"].includes(statusOf(e)));
@@ -562,23 +589,31 @@ function render() {
   statAktiv.textContent = active.length;
   statGesamt.textContent = entries.length;
 
-  const visible = entries
-    .filter((e) => {
-      if (filter === "aktiv") return e.status !== "erledigt";
-      if (filter === "erledigt") return e.status === "erledigt";
-      return true;
-    })
-    .sort((a, b) => {
-      if (a.status !== b.status) return a.status === "erledigt" ? 1 : -1;
-      return parseISO(a.deadline) - parseISO(b.deadline);
+  const query = searchQuery.trim().toLowerCase();
+  let visible = entries.filter((e) => {
+    if (filter === "aktiv") return e.status !== "erledigt";
+    if (filter === "erledigt") return e.status === "erledigt";
+    return true;
+  });
+  if (query) {
+    visible = visible.filter((e) => {
+      const haystack = [e.produkt, e.notiz, e.referenz].filter(Boolean).join(" ").toLowerCase();
+      return haystack.includes(query);
     });
+  }
+  visible = sortEntries(visible, sortMode);
 
   listEl.innerHTML = "";
   if (visible.length === 0) {
-    listEl.innerHTML = `<div class="fw-empty">
-      <div class="fw-empty-title">Noch nichts eingetragen</div>
-      <p>Trage eine Bestellung oder ein Abo ein — die Frist wird automatisch berechnet.</p>
-    </div>`;
+    listEl.innerHTML = entries.length === 0
+      ? `<div class="fw-empty">
+          <div class="fw-empty-title">Noch nichts eingetragen</div>
+          <p>Trage eine Bestellung oder ein Abo ein — die Frist wird automatisch berechnet.</p>
+        </div>`
+      : `<div class="fw-empty">
+          <div class="fw-empty-title">Keine Treffer</div>
+          <p>Keine Einträge passen zur aktuellen Suche/Filterung.</p>
+        </div>`;
     return;
   }
   visible.forEach((entry) => listEl.appendChild(renderCard(entry)));
@@ -608,6 +643,7 @@ function metaLine(entry) {
   else if (entry.type === "abo") base = `Frist/Stichtag: ${formatDate(entry.deadline)}`;
   else if (entry.type === "strafzettel") base = `Zahlungs-/Einspruchsfrist: ${formatDate(entry.deadline)}`;
   else if (entry.type === "rechnung") base = `Fällig am: ${formatDate(entry.deadline)}`;
+  else if (entry.type === "sonstiges") base = `Frist/Stichtag: ${formatDate(entry.deadline)}`;
   else base = `Fristende: ${formatDate(entry.deadline)}`;
   if (entry.referenz) {
     base += ` · Ref.: ${entry.referenz}`;
@@ -708,6 +744,17 @@ document.querySelectorAll(".fw-tab").forEach((btn) => {
   });
 });
 
+const searchInput = $("#search-input");
+const sortSelect = $("#sort-select");
+searchInput.addEventListener("input", () => {
+  searchQuery = searchInput.value;
+  render();
+});
+sortSelect.addEventListener("change", () => {
+  sortMode = sortSelect.value;
+  render();
+});
+
 /* ---------- Modal: neue Frist ---------- */
 
 const overlay = $("#fw-overlay");
@@ -719,6 +766,7 @@ const DIRECT_DATE_FIELDS = {
   abo: { field: $("#field-abo"), input: $("#input-abo") },
   strafzettel: { field: $("#field-strafzettel"), input: $("#input-strafzettel") },
   rechnung: { field: $("#field-rechnung"), input: $("#input-rechnung") },
+  sonstiges: { field: $("#field-sonstiges"), input: $("#input-sonstiges") },
 };
 const erhaltenField = $("#field-erhalten");
 const erhaltenInput = $("#input-erhalten");
@@ -739,6 +787,9 @@ const fileInput = $("#input-file");
 const previewLine = $("#preview-line");
 const fileRow = $("#file-row");
 const fileError = $("#file-error");
+const fileAddPageInput = $("#input-file-addpage");
+const pageThumbs = $("#page-thumbs");
+const btnAddPage = $("#btn-add-page");
 const ocrStatus = $("#ocr-status");
 const ocrSpinner = $("#ocr-spinner");
 const ocrStatusText = $("#ocr-status-text");
@@ -746,6 +797,7 @@ const saveBtn = $("#btn-save");
 
 let currentType = "retoure";
 let currentBelegDraft = null;
+let currentBelegPages = []; // mehrere Foto-Seiten desselben Belegs (nur bei Fotos, nicht bei PDF)
 // Verhindert, dass eine spät eintreffende OCR-Vermutung ein Feld
 // überschreibt, das der Mensch inzwischen selbst bearbeitet hat.
 let dateTouched = false;
@@ -754,11 +806,21 @@ let produktTouched = false;
 let referenzTouched = false;
 let ibanTouched = false;
 let empfaengerTouched = false;
+// Getrennt von "Touched": merkt sich, ob ein Feld schon durch die
+// Texterkennung EINER vorherigen Seite gefüllt wurde, damit eine weitere
+// Seite Lücken auffüllt statt einen bereits guten Treffer zu überschreiben.
+let dateAutoFilled = false;
+let betragAutoFilled = false;
+let produktAutoFilled = false;
+let referenzAutoFilled = false;
+let ibanAutoFilled = false;
+let empfaengerAutoFilled = false;
 
 const REFERENZ_LABELS = {
   abo: { label: "Kundennummer (optional)", hint: "Wird, falls angegeben, im Kündigungsschreiben genannt." },
   strafzettel: { label: "Aktenzeichen / Bescheidnummer (optional)", hint: "Wird, falls angegeben, im Einspruchsschreiben genannt." },
   rechnung: { label: "Rechnungs-/Verwendungszweck-Nummer (optional)", hint: "Praktisch als Verwendungszweck bei der Überweisung." },
+  sonstiges: { label: "Referenz/Nummer (optional)", hint: "Beliebige Notiznummer, falls hilfreich." },
 };
 
 function setVisibleFields(type) {
@@ -789,12 +851,19 @@ function setVisibleFields(type) {
 function openModal() {
   currentType = "retoure";
   currentBelegDraft = null;
+  currentBelegPages = [];
   dateTouched = false;
   betragTouched = false;
   produktTouched = false;
   referenzTouched = false;
   ibanTouched = false;
   empfaengerTouched = false;
+  dateAutoFilled = false;
+  betragAutoFilled = false;
+  produktAutoFilled = false;
+  referenzAutoFilled = false;
+  ibanAutoFilled = false;
+  empfaengerAutoFilled = false;
   produktInput.value = "";
   betragInput.value = "";
   notizInput.value = "";
@@ -805,7 +874,11 @@ function openModal() {
   erhaltenInput.value = toISO(new Date());
   Object.values(DIRECT_DATE_FIELDS).forEach(({ input }) => { input.value = toISO(addDays(new Date(), 14)); });
   fileInput.value = "";
+  fileAddPageInput.value = "";
   fileRow.style.display = "none";
+  pageThumbs.style.display = "none";
+  pageThumbs.innerHTML = "";
+  btnAddPage.style.display = "none";
   fileError.style.display = "none";
   ocrStatus.style.display = "none";
   typeOpts.forEach((o) => o.classList.toggle("active", o.dataset.type === "retoure"));
@@ -862,6 +935,10 @@ fileInput.addEventListener("change", async () => {
   if (!file) return;
   fileError.style.display = "none";
   ocrStatus.style.display = "none";
+  pageThumbs.style.display = "none";
+  pageThumbs.innerHTML = "";
+  btnAddPage.style.display = "none";
+  currentBelegPages = [];
   try {
     if (file.type === "application/pdf") {
       if (file.size > 2.5 * 1024 * 1024) {
@@ -881,8 +958,11 @@ fileInput.addEventListener("change", async () => {
       runOcr(file);
     } else {
       const dataUrl = await resizeImage(file);
-      currentBelegDraft = { name: file.name, mime: "image/jpeg", dataUrl };
-      showFileRow();
+      currentBelegPages = [dataUrl];
+      currentBelegDraft = { name: file.name, mime: "image/jpeg", dataUrl, pages: currentBelegPages };
+      fileRow.style.display = "none";
+      renderPageThumbs();
+      btnAddPage.style.display = "inline-block";
       runOcr(file); // im Hintergrund, blockiert das Formular nicht
     }
   } catch (e) {
@@ -890,6 +970,82 @@ fileInput.addEventListener("change", async () => {
     fileError.style.display = "block";
   }
 });
+
+btnAddPage.addEventListener("click", () => {
+  fileAddPageInput.value = "";
+  fileAddPageInput.click();
+});
+
+const MAX_BELEG_PAGES = 10;
+
+fileAddPageInput.addEventListener("change", async () => {
+  const file = fileAddPageInput.files && fileAddPageInput.files[0];
+  if (!file) return;
+  fileError.style.display = "none";
+  if (currentBelegPages.length >= MAX_BELEG_PAGES) {
+    fileError.textContent = `Maximal ${MAX_BELEG_PAGES} Seiten pro Beleg.`;
+    fileError.style.display = "block";
+    return;
+  }
+  try {
+    const dataUrl = await resizeImage(file);
+    currentBelegPages.push(dataUrl);
+    updateBelegDraftFromPages();
+    renderPageThumbs();
+    runOcr(file); // füllt nur noch offene Lücken, siehe die *AutoFilled-Sperren in runOcr()
+  } catch (e) {
+    fileError.textContent = "Seite konnte nicht gelesen werden.";
+    fileError.style.display = "block";
+  }
+});
+
+function updateBelegDraftFromPages() {
+  currentBelegDraft = {
+    name: currentBelegPages.length > 1 ? `Beleg (${currentBelegPages.length} Seiten)` : (currentBelegDraft && currentBelegDraft.name) || "Beleg",
+    mime: "image/jpeg",
+    dataUrl: currentBelegPages[0] || null,
+    pages: currentBelegPages,
+  };
+}
+
+function renderPageThumbs() {
+  pageThumbs.innerHTML = "";
+  if (!currentBelegPages.length) {
+    pageThumbs.style.display = "none";
+    btnAddPage.style.display = "none";
+    return;
+  }
+  pageThumbs.style.display = "flex";
+  btnAddPage.style.display = currentBelegPages.length < MAX_BELEG_PAGES ? "inline-block" : "none";
+  currentBelegPages.forEach((src, idx) => {
+    const wrap = document.createElement("div");
+    wrap.className = "fw-page-thumb-wrap";
+    const img = document.createElement("img");
+    img.src = src;
+    const num = document.createElement("span");
+    num.className = "fw-page-thumb-num";
+    num.textContent = String(idx + 1);
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "fw-page-thumb-remove";
+    removeBtn.setAttribute("aria-label", "Seite entfernen");
+    removeBtn.textContent = "×";
+    removeBtn.addEventListener("click", () => {
+      currentBelegPages.splice(idx, 1);
+      if (currentBelegPages.length === 0) {
+        currentBelegDraft = null;
+        fileInput.value = "";
+      } else {
+        updateBelegDraftFromPages();
+      }
+      renderPageThumbs();
+    });
+    wrap.appendChild(img);
+    wrap.appendChild(num);
+    wrap.appendChild(removeBtn);
+    pageThumbs.appendChild(wrap);
+  });
+}
 
 // Liefert erkannten Text — aus der Textebene eines PDFs (mit OCR-Fallback
 // für gescannte PDFs) oder per Bild-OCR für Fotos.
@@ -919,19 +1075,21 @@ async function runOcr(file) {
     const { text, lines } = await getTextFromFile(file);
     const applied = [];
 
-    if (!dateTouched) {
+    if (!dateTouched && !dateAutoFilled) {
       const guessedDate = parseDateFromText(text, currentType);
       const input = activeDateInput();
       if (guessedDate && input) {
         input.value = toISO(guessedDate);
         updatePreview();
+        dateAutoFilled = true;
         applied.push("Datum");
       }
     }
-    if (!betragTouched) {
+    if (!betragTouched && !betragAutoFilled) {
       const amount = parseAmountFromText(text);
       if (amount !== null && !isNaN(amount)) {
         betragInput.value = amount.toFixed(2);
+        betragAutoFilled = true;
         applied.push("Betrag");
       }
     }
@@ -939,29 +1097,32 @@ async function runOcr(file) {
     // bzw. oben rechts im Beleg (Positions-/Größenanalyse), sonst die
     // erste plausible Textzeile als Rückfallebene.
     const headerGuess = guessHeaderCandidate(lines) || guessMerchant(text);
-    if (!produktTouched && !produktInput.value.trim()) {
+    if (!produktTouched && !produktAutoFilled && !produktInput.value.trim()) {
       if (headerGuess) {
         produktInput.value = headerGuess;
         saveBtn.disabled = false;
+        produktAutoFilled = true;
         applied.push("Anbieter");
       }
     }
-    if (!referenzTouched && (currentType === "abo" || currentType === "strafzettel" || currentType === "rechnung")) {
+    if (!referenzTouched && !referenzAutoFilled && (REFERENZ_LABELS[currentType])) {
       const ref = parseReferenceFromText(text, currentType);
       if (ref) {
         referenzInput.value = ref;
+        referenzAutoFilled = true;
         applied.push(currentType === "rechnung" ? "Referenznummer" : currentType === "abo" ? "Kundennummer" : "Aktenzeichen");
       }
     }
     if (currentType === "rechnung") {
-      if (!ibanTouched) {
+      if (!ibanTouched && !ibanAutoFilled) {
         const iban = parseIbanFromText(text);
         if (iban) {
           ibanInput.value = formatIban(iban);
+          ibanAutoFilled = true;
           applied.push("IBAN");
         }
       }
-      if (!empfaengerTouched) {
+      if (!empfaengerTouched && !empfaengerAutoFilled) {
         // Gleiches Verfahren wie beim Anbieter: erst explizites Stichwort
         // ("Zahlungsempfänger", "Kontoinhaber" …), sonst dieselbe
         // Kopfzeilen-Erkennung, sonst als letzte Rückfallebene das bereits
@@ -969,6 +1130,7 @@ async function runOcr(file) {
         const recipient = parseRecipientFromText(text) || headerGuess || produktInput.value.trim() || null;
         if (recipient) {
           empfaengerInput.value = recipient;
+          empfaengerAutoFilled = true;
           applied.push("Zahlungsempfänger");
         }
       }
@@ -977,7 +1139,7 @@ async function runOcr(file) {
     if (applied.length) {
       setOcrStatus("success", `Aus dem Beleg erkannt: ${applied.join(", ")} — bitte prüfen.`);
     } else {
-      setOcrStatus("neutral", "Im Beleg konnte nichts Eindeutiges erkannt werden.");
+      setOcrStatus("neutral", "Auf dieser Seite konnte nichts Eindeutiges (mehr) erkannt werden.");
     }
   } catch (e) {
     setOcrStatus("neutral", "Texterkennung nicht verfügbar (evtl. kein Internet beim ersten Mal nötig).");
@@ -1018,7 +1180,7 @@ form.addEventListener("submit", (e) => {
     deadline,
     betrag: betragInput.value !== "" ? Number(betragInput.value) : null,
     notiz: notizInput.value.trim(),
-    referenz: (currentType === "abo" || currentType === "strafzettel" || currentType === "rechnung") ? referenzInput.value.trim() : "",
+    referenz: (REFERENZ_LABELS[currentType]) ? referenzInput.value.trim() : "",
     adresse: (currentType === "abo" || currentType === "strafzettel") ? adresseInput.value.trim() : "",
     empfaenger: currentType === "rechnung" ? empfaengerInput.value.trim() : "",
     iban: currentType === "rechnung" ? ibanInput.value.trim().toUpperCase() : "",
@@ -1038,15 +1200,56 @@ form.addEventListener("submit", (e) => {
 
 const viewerOverlay = $("#fw-viewer-overlay");
 const viewerBox = $("#fw-viewer-content");
+// Prüft die echten Datei-Signaturen (Magic Bytes) gängiger Bildformate,
+// statt nur dem behaupteten "data:image/..."-Präfix zu vertrauen — eine
+// über einen Backup-Import eingeschleuste, falsch benannte Datei fällt
+// damit auf. Gibt bei gültigem Bild die (ggf. bereinigte) Data-URL zurück,
+// sonst null.
+function sanitizeImageDataUrl(value) {
+  if (typeof value !== "string") return null;
+  const m = value.match(/^data:image\/(png|jpe?g|webp|gif);base64,([A-Za-z0-9+/=\r\n]+)$/i);
+  if (!m) return null;
+  const mime = m[1].toLowerCase();
+  const b64 = m[2].replace(/\s+/g, "");
+  if (!b64 || b64.length % 4 !== 0) return null;
+
+  let bin;
+  try {
+    bin = atob(b64);
+  } catch (e) {
+    return null;
+  }
+  if (!bin || bin.length < 4) return null;
+
+  const hasPngSig =
+    bin.length >= 8 &&
+    bin.charCodeAt(0) === 0x89 && bin.charCodeAt(1) === 0x50 && bin.charCodeAt(2) === 0x4e && bin.charCodeAt(3) === 0x47 &&
+    bin.charCodeAt(4) === 0x0d && bin.charCodeAt(5) === 0x0a && bin.charCodeAt(6) === 0x1a && bin.charCodeAt(7) === 0x0a;
+  const hasJpegSig = bin.length >= 3 && bin.charCodeAt(0) === 0xff && bin.charCodeAt(1) === 0xd8 && bin.charCodeAt(2) === 0xff;
+  const hasGifSig = bin.startsWith("GIF87a") || bin.startsWith("GIF89a");
+  const hasWebpSig = bin.length >= 12 && bin.startsWith("RIFF") && bin.slice(8, 12) === "WEBP";
+
+  if (mime === "png" && !hasPngSig) return null;
+  if ((mime === "jpg" || mime === "jpeg") && !hasJpegSig) return null;
+  if (mime === "gif" && !hasGifSig) return null;
+  if (mime === "webp" && !hasWebpSig) return null;
+
+  return `data:image/${mime};base64,${b64}`;
+}
+
 function openViewer(beleg) {
   currentBeleg = beleg;
   viewerBox.innerHTML = "";
-  // Sicherheit: nicht dem separat mitgeführten "mime"-Feld vertrauen (das
-  // könnte bei einem importierten Backup manipuliert sein), sondern den
-  // echten Anfang der Data-URL selbst prüfen. Zusätzlich läuft der
-  // PDF-Viewer in einem "sandbox"-iframe ohne Skriptrechte.
+  // Sicherheit: nicht dem behaupteten Data-URL-Präfix allein vertrauen —
+  // die echten Datei-Signaturen (Magic Bytes) der gängigen Bildformate
+  // prüfen. Der PDF-Viewer läuft zusätzlich in einem "sandbox"-iframe
+  // ohne Skriptrechte.
   const isRealPdf = typeof beleg.dataUrl === "string" && beleg.dataUrl.startsWith("data:application/pdf");
-  const isRealImage = typeof beleg.dataUrl === "string" && /^data:image\/(png|jpe?g|webp|gif);base64,/.test(beleg.dataUrl);
+  // Mehrseitige Fotobelege: jede Seite einzeln validieren, ungültige
+  // Seiten werden übersprungen statt die ganze Ansicht zu blockieren.
+  const pageList = Array.isArray(beleg.pages) && beleg.pages.length ? beleg.pages : [beleg.dataUrl];
+  const safeImagePages = pageList.map((p) => sanitizeImageDataUrl(p)).filter((p) => p !== null);
+  const isRealImage = safeImagePages.length > 0;
 
   if (isRealPdf) {
     const iframe = document.createElement("iframe");
@@ -1057,10 +1260,19 @@ function openViewer(beleg) {
     iframe.setAttribute("sandbox", ""); // keine Skriptausführung, keine Formulare, keine Navigation
     viewerBox.appendChild(iframe);
   } else if (isRealImage) {
-    const img = document.createElement("img");
-    img.src = beleg.dataUrl;
-    img.className = "fw-viewer-img";
-    viewerBox.appendChild(img);
+    const wrap = document.createElement("div");
+    wrap.style.display = "flex";
+    wrap.style.flexDirection = "column";
+    wrap.style.gap = "10px";
+    wrap.style.maxHeight = "78vh";
+    wrap.style.overflowY = "auto";
+    safeImagePages.forEach((src) => {
+      const img = document.createElement("img");
+      img.src = src;
+      img.className = "fw-viewer-img";
+      wrap.appendChild(img);
+    });
+    viewerBox.appendChild(wrap);
   } else {
     const p = document.createElement("p");
     p.style.padding = "20px";

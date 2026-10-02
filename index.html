@@ -28,6 +28,7 @@
           <button class="fw-menu-item" id="menu-export">📤 Backup exportieren</button>
           <button class="fw-menu-item" id="menu-import">📥 Backup importieren</button>
           <button class="fw-menu-item" id="menu-sender">👤 Absenderdaten</button>
+          <button class="fw-menu-item" id="menu-garantie">🛡️ Garantie-Archiv</button>
           <button class="fw-menu-item" id="menu-feedback">💬 Feedback senden</button>
         </div>
       </div>
@@ -50,6 +51,10 @@
         <div class="fw-stat-num" id="stat-gesamt">0</div>
         <div class="fw-stat-label">Gesamt</div>
       </div>
+      <button class="fw-stat fw-stat-clickable" id="stat-garantie-btn" type="button">
+        <div class="fw-stat-num" id="stat-garantie">0</div>
+        <div class="fw-stat-label">🛡️ Garantien</div>
+      </button>
     </div>
   </header>
 
@@ -86,10 +91,10 @@
   <!-- Modal: neue Frist -->
   <div class="fw-overlay" id="fw-overlay" style="display:none">
     <div class="fw-modal">
-      <h2 class="fw-modal-title">Neue Frist eintragen</h2>
+      <h2 class="fw-modal-title" id="fw-form-title">Neue Frist eintragen</h2>
       <p class="fw-modal-sub">Alles bleibt lokal auf diesem Gerät gespeichert.</p>
       <form id="fw-form">
-        <div class="fw-field">
+        <div class="fw-field" id="field-art">
           <span class="fw-label">Art</span>
           <div class="fw-type-toggle">
             <div class="fw-type-opt active" data-type="retoure">Widerruf / Retoure</div>
@@ -148,6 +153,14 @@
           <label class="fw-label" for="input-sonstiges">Frist / Stichtag</label>
           <input type="date" class="fw-input" id="input-sonstiges" />
           <p class="fw-hint">Für alles, was in keine der anderen Kategorien passt.</p>
+        </div>
+
+        <div class="fw-field" id="field-garantie" style="display:none">
+          <label class="fw-label" for="input-kaufdatum">Kaufdatum</label>
+          <input type="date" class="fw-input" id="input-kaufdatum" />
+          <label class="fw-label" for="input-garantiedauer" style="margin-top:12px">Garantiedauer (Jahre)</label>
+          <input type="number" class="fw-input" id="input-garantiedauer" min="0" max="30" step="1" value="2" />
+          <p class="fw-hint">Garantie-Ende wird automatisch berechnet.</p>
         </div>
 
         <div class="fw-field">
@@ -294,6 +307,21 @@
       <div class="fw-modal-actions">
         <button type="button" class="fw-btn-secondary" id="compare-close" style="flex:1">Schließen</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Garantie-Archiv -->
+  <div class="fw-overlay" id="garantie-overlay" style="display:none">
+    <div class="fw-modal fw-modal-wide">
+      <div class="fw-modal-header-row">
+        <div>
+          <h2 class="fw-modal-title">🛡️ Garantie-Archiv</h2>
+          <p class="fw-modal-sub">Kaufbelege &amp; Garantiefristen — getrennt von den übrigen Fristen, da seltener gebraucht.</p>
+        </div>
+        <button type="button" class="fw-viewer-close" id="garantie-close" aria-label="Schließen">✕</button>
+      </div>
+      <button type="button" class="fw-add-btn" id="btn-add-garantie" style="margin-bottom:14px">+ Neue Garantie</button>
+      <div id="garantie-list"></div>
     </div>
   </div>
 

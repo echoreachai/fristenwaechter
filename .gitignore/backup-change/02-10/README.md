@@ -113,23 +113,6 @@ Während ein Foto/PDF gelesen wird, zeigt die App jetzt einen auffälligen
 Hinweis mit Lade-Spinner (statt eines kleinen grauen Texthinweises) —
 leichter zu erkennen, dass die Erkennung noch läuft.
 
-## Garantie-Archiv
-
-Eigener Bereich für Kaufbelege und Garantiefristen — bewusst getrennt von
-den übrigen Fristen, da seltener gebraucht. Erreichbar über das Menü (⋮)
-→ "🛡️ Garantie-Archiv" oder direkt über die Kachel "🛡️ Garantien" im
-Dashboard (die Zahl zeigt aktive Garantien und färbt sich gelb, sobald
-eine davon bald abläuft).
-
-- Neue Garantie: Kaufdatum + Garantiedauer in Jahren (Standard: 2) — das
-  Garantie-Ende wird automatisch berechnet (Schaltjahre korrekt).
-- Beim Scan eines Kassenbons/Kaufbelegs sucht die Texterkennung gezielt
-  nach Kaufdatum/Bondatum, dazu Händler und Betrag wie gewohnt.
-- Garantien erscheinen nicht in der normalen Fristen-Liste und zählen
-  nicht in Dringend/Bald/Aktiv/Gesamt mit.
-- Lange Laufzeiten zeigt der Stempel in Monaten statt Tagen an.
-- Wird bei Backup-Export/-Import vollständig mitgesichert.
-
 ## Mehrseitige Belege scannen
 
 Nach dem ersten Foto erscheint ein Button **"+ Weitere Seite

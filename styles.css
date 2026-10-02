@@ -146,6 +146,13 @@ body{
   padding: 9px 13px;
   min-width: 84px;
 }
+.fw-stat-clickable{
+  cursor: pointer;
+  font-family: var(--font-body);
+  text-align: left;
+  appearance: none;
+}
+.fw-stat-clickable:hover{ background: var(--paper-2); }
 .fw-stat-num{
   font-family: var(--font-mono);
   font-size: 20px;
@@ -370,6 +377,19 @@ body{
   padding: 22px;
   border: 1px solid var(--line);
 }
+.fw-modal-wide{
+  max-width: 560px;
+  max-height: 86vh;
+  overflow-y: auto;
+}
+.fw-modal-header-row{
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+.fw-modal-header-row .fw-viewer-close{ position: static; flex-shrink: 0; }
 .fw-modal-title{
   font-family: var(--font-display);
   font-size: 20px;

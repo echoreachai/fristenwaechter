@@ -53,6 +53,13 @@ function computeRetourenDeadline(erhaltenISO) {
   while (!isBusinessDay(d)) d = addDays(d, 1);
   return toISO(d);
 }
+// Garantie-Ende = Kaufdatum + volle Jahre (Schaltjahre werden durch
+// setFullYear korrekt berücksichtigt, anders als eine feste Tageszahl).
+function computeGarantieEnde(kaufdatumISO, jahre) {
+  const d = parseISO(kaufdatumISO);
+  d.setFullYear(d.getFullYear() + (Number(jahre) || 0));
+  return toISO(d);
+}
 function daysUntil(iso) {
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const target = parseISO(iso); target.setHours(0, 0, 0, 0);
@@ -162,6 +169,11 @@ const DATE_KEYWORD_TIERS_BY_TYPE = {
   ],
   sonstiges: [
     ["frist", "stichtag", "fällig", "faellig", "termin"],
+    ["datum"],
+  ],
+  garantie: [
+    ["kaufdatum", "kassenbon", "bondatum", "belegdatum"],
+    ["rechnungsdatum", "lieferdatum"],
     ["datum"],
   ],
 };
@@ -436,6 +448,7 @@ const TYPE_META = {
   strafzettel: { label: "Strafzettel" },
   rechnung: { label: "Offene Rechnung" },
   sonstiges: { label: "Sonstiges" },
+  garantie: { label: "Garantie" },
 };
 
 // Sicherheit: Einträge aus einer importierten Backup-Datei kommen von
@@ -465,6 +478,8 @@ function sanitizeImportedEntry(raw) {
     type,
     produkt: str(raw.produkt, 200) || "Ohne Titel",
     erhalten: str(raw.erhalten, 10),
+    kaufdatum: str(raw.kaufdatum, 10) || null,
+    garantieJahre: (typeof raw.garantieJahre === "number" && raw.garantieJahre >= 0 && raw.garantieJahre <= 30) ? raw.garantieJahre : null,
     deadline: str(raw.deadline, 10) || toISO(new Date()),
     betrag: num(raw.betrag),
     notiz: str(raw.notiz, 1000),
@@ -553,6 +568,10 @@ const statDringend = $("#stat-dringend");
 const statBald = $("#stat-bald");
 const statAktiv = $("#stat-aktiv");
 const statGesamt = $("#stat-gesamt");
+const statGarantie = $("#stat-garantie");
+const statGarantieBtn = $("#stat-garantie-btn");
+const garantieOverlay = $("#garantie-overlay");
+const garantieList = $("#garantie-list");
 const errorBox = $("#fw-error");
 
 function showError(msg) {
@@ -580,17 +599,28 @@ function sortEntries(list, mode) {
 }
 
 function render() {
-  const active = entries.filter((e) => e.status !== "erledigt");
+  // Garantien laufen als eigener Bereich (Garantie-Archiv) getrennt von
+  // den übrigen Fristen — sie tauchen weder in der Hauptliste noch in den
+  // Dringend/Bald/Aktiv/Gesamt-Zahlen oben auf.
+  const fristEntries = entries.filter((e) => e.type !== "garantie");
+  const garantieEntries = entries.filter((e) => e.type === "garantie");
+
+  const active = fristEntries.filter((e) => e.status !== "erledigt");
   const dringend = active.filter((e) => ["dringend", "abgelaufen"].includes(statusOf(e)));
   const bald = active.filter((e) => statusOf(e) === "bald");
 
   statDringend.textContent = dringend.length;
   statBald.textContent = bald.length;
   statAktiv.textContent = active.length;
-  statGesamt.textContent = entries.length;
+  statGesamt.textContent = fristEntries.length;
+
+  const activeGarantien = garantieEntries.filter((e) => e.status !== "erledigt");
+  const garantienBaldFaellig = activeGarantien.some((e) => ["dringend", "bald", "abgelaufen"].includes(statusOf(e)));
+  statGarantie.textContent = activeGarantien.length;
+  statGarantie.style.color = garantienBaldFaellig ? "var(--amber)" : "var(--ink)";
 
   const query = searchQuery.trim().toLowerCase();
-  let visible = entries.filter((e) => {
+  let visible = fristEntries.filter((e) => {
     if (filter === "aktiv") return e.status !== "erledigt";
     if (filter === "erledigt") return e.status === "erledigt";
     return true;
@@ -605,7 +635,7 @@ function render() {
 
   listEl.innerHTML = "";
   if (visible.length === 0) {
-    listEl.innerHTML = entries.length === 0
+    listEl.innerHTML = fristEntries.length === 0
       ? `<div class="fw-empty">
           <div class="fw-empty-title">Noch nichts eingetragen</div>
           <p>Trage eine Bestellung oder ein Abo ein — die Frist wird automatisch berechnet.</p>
@@ -617,6 +647,7 @@ function render() {
     return;
   }
   visible.forEach((entry) => listEl.appendChild(renderCard(entry)));
+  if (garantieOverlay.style.display === "flex") renderGarantieArchiv();
 }
 
 function stampSVG(status, dleft) {
@@ -624,8 +655,13 @@ function stampSVG(status, dleft) {
   let big = "", small = "";
   if (status === "erledigt") { big = "OK"; small = "ERLEDIGT"; }
   else if (status === "abgelaufen") { big = String(Math.abs(dleft)); small = "TAGE ÜBERFÄLLIG"; }
+  else if (dleft > 365) {
+    // Lange Laufzeiten (v. a. Garantien) in Monaten, damit die Zahl in den Stempel passt.
+    const months = Math.floor(dleft / 30.44);
+    big = String(months); small = "MONATE ÜBRIG";
+  }
   else { big = String(dleft); small = dleft === 1 ? "TAG ÜBRIG" : "TAGE ÜBRIG"; }
-  const fontSize = big.length > 2 ? 20 : 26;
+  const fontSize = big.length > 3 ? 16 : big.length > 2 ? 20 : 26;
   return `
   <svg viewBox="0 0 100 100" width="70" height="70" class="fw-stamp" aria-hidden="true">
     <g transform="rotate(-9 50 50)">
@@ -644,6 +680,7 @@ function metaLine(entry) {
   else if (entry.type === "strafzettel") base = `Zahlungs-/Einspruchsfrist: ${formatDate(entry.deadline)}`;
   else if (entry.type === "rechnung") base = `Fällig am: ${formatDate(entry.deadline)}`;
   else if (entry.type === "sonstiges") base = `Frist/Stichtag: ${formatDate(entry.deadline)}`;
+  else if (entry.type === "garantie") base = `${entry.kaufdatum ? `Gekauft: ${formatDate(entry.kaufdatum)} · ` : ""}Garantie bis: ${formatDate(entry.deadline)}`;
   else base = `Fristende: ${formatDate(entry.deadline)}`;
   if (entry.referenz) {
     base += ` · Ref.: ${entry.referenz}`;
@@ -783,6 +820,11 @@ const adresseInput = $("#input-adresse");
 const fieldZahlung = $("#field-zahlung");
 const empfaengerInput = $("#input-empfaenger");
 const ibanInput = $("#input-iban");
+const fieldGarantie = $("#field-garantie");
+const formTitle = $("#fw-form-title");
+const fieldArt = $("#field-art");
+const kaufdatumInput = $("#input-kaufdatum");
+const garantiedauerInput = $("#input-garantiedauer");
 const fileInput = $("#input-file");
 const previewLine = $("#preview-line");
 const fileRow = $("#file-row");
@@ -846,10 +888,11 @@ function setVisibleFields(type) {
   }
 
   fieldZahlung.style.display = type === "rechnung" ? "block" : "none";
+  fieldGarantie.style.display = type === "garantie" ? "block" : "none";
 }
 
-function openModal() {
-  currentType = "retoure";
+function openModal(presetType) {
+  currentType = presetType || "retoure";
   currentBelegDraft = null;
   currentBelegPages = [];
   dateTouched = false;
@@ -872,6 +915,8 @@ function openModal() {
   empfaengerInput.value = "";
   ibanInput.value = "";
   erhaltenInput.value = toISO(new Date());
+  kaufdatumInput.value = toISO(new Date());
+  garantiedauerInput.value = "2";
   Object.values(DIRECT_DATE_FIELDS).forEach(({ input }) => { input.value = toISO(addDays(new Date(), 14)); });
   fileInput.value = "";
   fileAddPageInput.value = "";
@@ -881,8 +926,13 @@ function openModal() {
   btnAddPage.style.display = "none";
   fileError.style.display = "none";
   ocrStatus.style.display = "none";
-  typeOpts.forEach((o) => o.classList.toggle("active", o.dataset.type === "retoure"));
-  setVisibleFields("retoure");
+  typeOpts.forEach((o) => o.classList.toggle("active", o.dataset.type === currentType));
+  // Garantie wird nicht über die normale Kategorie-Auswahl angelegt
+  // (seltener gebraucht), sondern nur über das Garantie-Archiv — dort ist
+  // der Typ schon feststehend, die Auswahl wird dann ausgeblendet.
+  fieldArt.style.display = presetType ? "none" : "block";
+  formTitle.textContent = presetType === "garantie" ? "Neue Garantie eintragen" : "Neue Frist eintragen";
+  setVisibleFields(currentType);
   updatePreview();
   overlay.style.display = "flex";
   produktInput.focus();
@@ -891,12 +941,14 @@ function closeModal() { overlay.style.display = "none"; }
 
 function activeDateInput() {
   if (currentType === "retoure") return erhaltenInput;
+  if (currentType === "garantie") return kaufdatumInput;
   const conf = DIRECT_DATE_FIELDS[currentType];
   return conf ? conf.input : null;
 }
 
 function currentDeadline() {
   if (currentType === "retoure") return computeRetourenDeadline(erhaltenInput.value || toISO(new Date()));
+  if (currentType === "garantie") return computeGarantieEnde(kaufdatumInput.value || toISO(new Date()), garantiedauerInput.value || 0);
   const conf = DIRECT_DATE_FIELDS[currentType];
   return (conf && conf.input.value) || toISO(new Date());
 }
@@ -916,6 +968,9 @@ typeOpts.forEach((opt) => {
   });
 });
 erhaltenInput.addEventListener("input", () => { dateTouched = true; });
+kaufdatumInput.addEventListener("input", () => { dateTouched = true; });
+kaufdatumInput.addEventListener("change", updatePreview);
+garantiedauerInput.addEventListener("input", updatePreview);
 erhaltenInput.addEventListener("change", updatePreview);
 Object.values(DIRECT_DATE_FIELDS).forEach(({ input }) => {
   input.addEventListener("input", () => { dateTouched = true; });
@@ -1163,8 +1218,8 @@ function showFileRow() {
   fileRow.appendChild(name);
 }
 
-$("#btn-add").addEventListener("click", openModal);
-$("#fab-add").addEventListener("click", openModal);
+$("#btn-add").addEventListener("click", () => openModal());
+$("#fab-add").addEventListener("click", () => openModal());
 $("#btn-cancel").addEventListener("click", closeModal);
 overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) closeModal(); });
 
@@ -1177,6 +1232,8 @@ form.addEventListener("submit", (e) => {
     type: currentType,
     produkt: produktInput.value.trim(),
     erhalten: currentType === "retoure" ? erhaltenInput.value : null,
+    kaufdatum: currentType === "garantie" ? kaufdatumInput.value : null,
+    garantieJahre: currentType === "garantie" ? Number(garantiedauerInput.value) || 0 : null,
     deadline,
     betrag: betragInput.value !== "" ? Number(betragInput.value) : null,
     notiz: notizInput.value.trim(),
@@ -1698,6 +1755,30 @@ $("#sender-save").addEventListener("click", () => {
   saveSenderData({ name, strasse, plzOrt });
   senderOverlay.style.display = "none";
 });
+
+/* ---- Garantie-Archiv ---- */
+function renderGarantieArchiv() {
+  const garantieEntries = sortEntries(entries.filter((e) => e.type === "garantie"), sortMode);
+  garantieList.innerHTML = "";
+  if (garantieEntries.length === 0) {
+    garantieList.innerHTML = `<div class="fw-empty">
+      <div class="fw-empty-title">Noch keine Garantie eingetragen</div>
+      <p>Kaufbeleg fotografieren — Kaufdatum, Händler und Betrag werden automatisch erkannt.</p>
+    </div>`;
+    return;
+  }
+  garantieEntries.forEach((entry) => garantieList.appendChild(renderCard(entry)));
+}
+function openGarantieArchiv() {
+  menuDropdown.style.display = "none";
+  renderGarantieArchiv();
+  garantieOverlay.style.display = "flex";
+}
+$("#menu-garantie").addEventListener("click", openGarantieArchiv);
+statGarantieBtn.addEventListener("click", openGarantieArchiv);
+$("#garantie-close").addEventListener("click", () => { garantieOverlay.style.display = "none"; });
+garantieOverlay.addEventListener("mousedown", (e) => { if (e.target === garantieOverlay) garantieOverlay.style.display = "none"; });
+$("#btn-add-garantie").addEventListener("click", () => openModal("garantie"));
 
 /* ---- Kündigungs-/Einspruchsschreiben als PDF ----
    Erzeugt eine fertig formatierte Brief-Vorlage (DIN-5008-ähnlich) direkt
