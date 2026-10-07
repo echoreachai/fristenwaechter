@@ -24,6 +24,10 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Fristen-Wächter nutzt die Kamera, um Rechnungen, Belege und Briefe zu fotografieren. Die Fotos bleiben auf deinem Gerät.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Fristen-Wächter greift auf deine Fotos zu, damit du bereits fotografierte Belege importieren kannst. Die Bilder bleiben auf deinem Gerät.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
