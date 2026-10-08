@@ -716,3 +716,7 @@ body{
   padding-top: max(24px, env(safe-area-inset-top, 0px));
   padding-bottom: max(24px, env(safe-area-inset-bottom, 0px));
 }
+
+/* Weitere Belegseiten: Kamera und Galerie getrennt */
+.fw-addpage-row{ display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.fw-addpage-row .fw-action{ font-size: 12px; padding: 8px 12px; }

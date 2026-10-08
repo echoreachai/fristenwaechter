@@ -1,4 +1,4 @@
-const CACHE_NAME = "fristen-waechter-v2";
+const CACHE_NAME = "fristen-waechter-v3";
 const CORE_ASSETS = [
   "./",
   "./index.html",
@@ -39,7 +39,7 @@ self.addEventListener("fetch", (event) => {
         caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy)).catch(() => {});
         return response;
       })
-      .catch(() => caches.match(event.request))
+      .catch(() => caches.match(event.request).then((cached) => cached || Response.error()))
   );
 });
 

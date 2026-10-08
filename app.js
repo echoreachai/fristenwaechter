@@ -81,12 +81,48 @@ function getOcrWorker() {
       if (typeof Tesseract === "undefined") throw new Error("Tesseract.js nicht geladen");
       return Tesseract.createWorker("deu");
     })();
+    // Schlägt der Start fehl (z. B. offline), beim nächsten Versuch neu laden
+    // statt den Fehler bis zum Neustart der App festzuhalten.
+    ocrWorkerPromise.catch(() => { ocrWorkerPromise = null; });
   }
   return ocrWorkerPromise;
 }
 
-if (typeof pdfjsLib !== "undefined") {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.9.155/build/pdf.worker.min.mjs";
+const PDFJS_URL = "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.9.155/build/pdf.min.mjs";
+const PDFJS_WORKER_URL = "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.9.155/build/pdf.worker.min.mjs";
+
+// PDF-Dateien werden auf manchen Android-Geräten ohne MIME-Typ geliefert
+// (file.type leer oder "application/octet-stream") — dann zählt die Endung.
+function isPdfFile(file) {
+  if (!file) return false;
+  if (file.type === "application/pdf") return true;
+  return (!file.type || file.type === "application/octet-stream") && /\.pdf$/i.test(file.name || "");
+}
+
+// pdf.js wird als ES-Modul geladen und ist erst NACH app.js verfügbar.
+// Hier wird darauf gewartet (bzw. notfalls selbst nachgeladen) und der
+// Worker-Pfad sicher gesetzt.
+let pdfjsPromise = null;
+function ensurePdfjs() {
+  if (window.pdfjsLib) {
+    if (!window.pdfjsLib.GlobalWorkerOptions.workerSrc) window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL;
+    return Promise.resolve(window.pdfjsLib);
+  }
+  if (!pdfjsPromise) {
+    pdfjsPromise = new Promise((resolve, reject) => {
+      const onReady = () => { clearTimeout(timer); resolve(window.pdfjsLib); };
+      window.addEventListener("pdfjs-ready", onReady, { once: true });
+      const timer = setTimeout(() => {
+        window.removeEventListener("pdfjs-ready", onReady);
+        import(PDFJS_URL).then((lib) => { window.pdfjsLib = lib; resolve(lib); }, reject);
+      }, 4000);
+    }).then((lib) => {
+      if (!lib.GlobalWorkerOptions.workerSrc) lib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL;
+      return lib;
+    });
+    pdfjsPromise.catch(() => { pdfjsPromise = null; });
+  }
+  return pdfjsPromise;
 }
 
 // Liest Text aus einem PDF. Digital erzeugte PDFs (Rechnungen, Bescheide)
@@ -94,7 +130,7 @@ if (typeof pdfjsLib !== "undefined") {
 // exakt). Enthält das PDF kaum Text (z. B. ein eingescanntes Dokument),
 // wird die erste Seite stattdessen als Bild gerendert und per OCR gelesen.
 async function extractTextFromPdf(file) {
-  if (typeof pdfjsLib === "undefined") throw new Error("PDF.js nicht geladen");
+  const pdfjsLib = await ensurePdfjs();
   const buffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
   const maxPages = Math.min(pdf.numPages, 3);
@@ -830,6 +866,7 @@ const previewLine = $("#preview-line");
 const fileRow = $("#file-row");
 const fileError = $("#file-error");
 const fileAddPageInput = $("#input-file-addpage");
+const fileAddPageCameraInput = $("#input-file-addpage-camera");
 const pageThumbs = $("#page-thumbs");
 const btnAddPage = $("#btn-add-page");
 const ocrStatus = $("#ocr-status");
@@ -920,6 +957,7 @@ function openModal(presetType) {
   Object.values(DIRECT_DATE_FIELDS).forEach(({ input }) => { input.value = toISO(addDays(new Date(), 14)); });
   fileInput.value = "";
   fileAddPageInput.value = "";
+  fileAddPageCameraInput.value = "";
   fileRow.style.display = "none";
   pageThumbs.style.display = "none";
   pageThumbs.innerHTML = "";
@@ -995,19 +1033,27 @@ fileInput.addEventListener("change", async () => {
   btnAddPage.style.display = "none";
   currentBelegPages = [];
   try {
-    if (file.type === "application/pdf") {
+    if (isPdfFile(file)) {
       if (file.size > 2.5 * 1024 * 1024) {
         fileError.textContent = "PDF ist größer als 2,5 MB — es wird nur der Dateiname gespeichert.";
         fileError.style.display = "block";
-        currentBelegDraft = { name: file.name, mime: file.type, dataUrl: null };
+        currentBelegDraft = { name: file.name, mime: "application/pdf", dataUrl: null };
         showFileRow();
         runOcr(file); // Texterkennung funktioniert unabhängig von der Speicherung
         return;
       }
       const reader = new FileReader();
       reader.onload = (ev) => {
-        currentBelegDraft = { name: file.name, mime: file.type, dataUrl: ev.target.result };
+        let dataUrl = ev.target.result;
+        // Ohne MIME-Typ liefert FileReader "data:application/octet-stream" — korrigieren,
+        // damit die PDF-Vorschau den Beleg später als PDF öffnet.
+        if (typeof dataUrl === "string") dataUrl = dataUrl.replace(/^data:(application\/octet-stream)?;base64,/, "data:application/pdf;base64,");
+        currentBelegDraft = { name: file.name, mime: "application/pdf", dataUrl };
         showFileRow();
+      };
+      reader.onerror = () => {
+        fileError.textContent = "Die Datei konnte nicht gelesen werden. Liegt sie nur in der Cloud (z. B. Google Drive), lade sie zuerst auf das Gerät herunter.";
+        fileError.style.display = "block";
       };
       reader.readAsDataURL(file);
       runOcr(file);
@@ -1017,24 +1063,31 @@ fileInput.addEventListener("change", async () => {
       currentBelegDraft = { name: file.name, mime: "image/jpeg", dataUrl, pages: currentBelegPages };
       fileRow.style.display = "none";
       renderPageThumbs();
-      btnAddPage.style.display = "inline-block";
+      btnAddPage.style.display = "flex";
       runOcr(file); // im Hintergrund, blockiert das Formular nicht
     }
   } catch (e) {
-    fileError.textContent = "Datei konnte nicht gelesen werden.";
+    fileError.textContent = "Datei konnte nicht gelesen werden. Unterstützt werden Fotos (JPG, PNG) und PDF.";
     fileError.style.display = "block";
   }
 });
 
-btnAddPage.addEventListener("click", () => {
+// Zwei getrennte Wege für weitere Seiten: Android (ab 14) öffnet bei
+// reinen Bild-Feldern die Fotoauswahl OHNE Kamera — deshalb gibt es einen
+// eigenen Kamera-Knopf (capture), der direkt die Kamera startet.
+$("#btn-add-page-camera").addEventListener("click", () => {
+  fileAddPageCameraInput.value = "";
+  fileAddPageCameraInput.click();
+});
+$("#btn-add-page-gallery").addEventListener("click", () => {
   fileAddPageInput.value = "";
   fileAddPageInput.click();
 });
 
 const MAX_BELEG_PAGES = 10;
 
-fileAddPageInput.addEventListener("change", async () => {
-  const file = fileAddPageInput.files && fileAddPageInput.files[0];
+async function handleAddPageInput(input) {
+  const file = input.files && input.files[0];
   if (!file) return;
   fileError.style.display = "none";
   if (currentBelegPages.length >= MAX_BELEG_PAGES) {
@@ -1049,10 +1102,12 @@ fileAddPageInput.addEventListener("change", async () => {
     renderPageThumbs();
     runOcr(file); // füllt nur noch offene Lücken, siehe die *AutoFilled-Sperren in runOcr()
   } catch (e) {
-    fileError.textContent = "Seite konnte nicht gelesen werden.";
+    fileError.textContent = "Seite konnte nicht gelesen werden. Bitte ein Foto (JPG oder PNG) wählen.";
     fileError.style.display = "block";
   }
-});
+}
+fileAddPageInput.addEventListener("change", () => handleAddPageInput(fileAddPageInput));
+fileAddPageCameraInput.addEventListener("change", () => handleAddPageInput(fileAddPageCameraInput));
 
 function updateBelegDraftFromPages() {
   currentBelegDraft = {
@@ -1071,7 +1126,7 @@ function renderPageThumbs() {
     return;
   }
   pageThumbs.style.display = "flex";
-  btnAddPage.style.display = currentBelegPages.length < MAX_BELEG_PAGES ? "inline-block" : "none";
+  btnAddPage.style.display = currentBelegPages.length < MAX_BELEG_PAGES ? "flex" : "none";
   currentBelegPages.forEach((src, idx) => {
     const wrap = document.createElement("div");
     wrap.className = "fw-page-thumb-wrap";
@@ -1105,7 +1160,7 @@ function renderPageThumbs() {
 // Liefert erkannten Text — aus der Textebene eines PDFs (mit OCR-Fallback
 // für gescannte PDFs) oder per Bild-OCR für Fotos.
 async function getTextFromFile(file) {
-  if (file.type === "application/pdf") return extractTextFromPdf(file);
+  if (isPdfFile(file)) return extractTextFromPdf(file);
   // Eigene, etwas größere Version nur für die Texterkennung — die
   // gespeicherte Beleg-Vorschau bleibt bei der kleineren Auflösung.
   const ocrDataUrl = await resizeImage(file, 1500, 0.9);
@@ -1125,7 +1180,7 @@ function setOcrStatus(state, text) {
 async function runOcr(file) {
   // Deutlich sichtbarer Hinweis, solange der Scan läuft — leicht zu
   // übersehen, wenn es nur ein kleiner grauer Text ist.
-  setOcrStatus("loading", file.type === "application/pdf" ? "PDF wird gelesen …" : "Beleg wird gelesen …");
+  setOcrStatus("loading", isPdfFile(file) ? "PDF wird gelesen …" : "Beleg wird gelesen …");
   try {
     const { text, lines } = await getTextFromFile(file);
     const applied = [];
@@ -1197,7 +1252,17 @@ async function runOcr(file) {
       setOcrStatus("neutral", "Auf dieser Seite konnte nichts Eindeutiges (mehr) erkannt werden.");
     }
   } catch (e) {
-    setOcrStatus("neutral", "Texterkennung nicht verfügbar (evtl. kein Internet beim ersten Mal nötig).");
+    console.warn("Texterkennung fehlgeschlagen:", e);
+    const msg = String((e && e.message) || e || "");
+    if (navigator.onLine === false) {
+      setOcrStatus("neutral", "Keine Internetverbindung — die Texterkennung braucht beim ersten Mal Internet. Der Beleg ist trotzdem gespeichert, die Felder kannst du von Hand ausfüllen.");
+    } else if (/password/i.test(msg)) {
+      setOcrStatus("neutral", "Das PDF ist passwortgeschützt und kann nicht gelesen werden. Der Beleg ist trotzdem gespeichert.");
+    } else if (/invalid pdf|corrupt|unexpected/i.test(msg)) {
+      setOcrStatus("neutral", "Das PDF konnte nicht gelesen werden (Datei beschädigt oder kein echtes PDF).");
+    } else {
+      setOcrStatus("neutral", "Automatische Erkennung hat diesmal nicht geklappt — bitte die Felder von Hand ausfüllen.");
+    }
   }
 }
 function showFileRow() {

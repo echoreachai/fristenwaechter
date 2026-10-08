@@ -109,9 +109,13 @@
           <label class="fw-label" for="input-file">📷 Beleg scannen (Foto oder PDF)</label>
           <input type="file" class="fw-input" id="input-file" accept="image/*,application/pdf" />
           <input type="file" id="input-file-addpage" accept="image/*" style="display:none" />
+          <input type="file" id="input-file-addpage-camera" accept="image/*" capture="environment" style="display:none" />
           <div class="fw-page-thumbs" id="page-thumbs" style="display:none"></div>
           <div class="fw-file-row" id="file-row" style="display:none"></div>
-          <button type="button" class="fw-action" id="btn-add-page" style="display:none;margin-top:8px">+ Weitere Seite hinzufügen</button>
+          <div class="fw-addpage-row" id="btn-add-page" style="display:none">
+            <button type="button" class="fw-action" id="btn-add-page-camera">📷 Weitere Seite fotografieren</button>
+            <button type="button" class="fw-action" id="btn-add-page-gallery">🖼️ Aus Galerie / Dateien</button>
+          </div>
           <p class="fw-hint" id="file-error" style="display:none;color:var(--red)"></p>
           <div class="fw-ocr-status" id="ocr-status" style="display:none">
             <span class="fw-ocr-spinner" id="ocr-spinner"></span>
@@ -350,8 +354,12 @@
     // pdf.js 4.x+ liefert nur noch ES-Module aus (kein klassisches <script src> mehr
     // möglich) — dieser kleine Wrapper macht die Bibliothek trotzdem als globales
     // "pdfjsLib" verfügbar, damit app.js unverändert darauf zugreifen kann.
+    // Der Worker-Pfad wird HIER gesetzt: Module laufen erst nach app.js,
+    // dort wäre pdfjsLib beim Start noch nicht vorhanden.
     import * as pdfjsLib from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.9.155/build/pdf.min.mjs";
+    pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.9.155/build/pdf.worker.min.mjs";
     window.pdfjsLib = pdfjsLib;
+    window.dispatchEvent(new Event("pdfjs-ready"));
   </script>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js" integrity="sha384-GJqSu7vueQ9qN0E9yLPb3Wtpd7OrgK8KmYzC8T1IysG1bcvxvIO4qtYR/D3A991F" crossorigin="anonymous"></script>
   <script src="app.js"></script>
