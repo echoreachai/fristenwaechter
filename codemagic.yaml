@@ -35,6 +35,9 @@ workflows:
           rm -rf www && mkdir -p www
           cp index.html app.js styles.css sw.js manifest.json datenschutz.html impressum.html www/
           cp -R icons www/
+          # iOS-Version (mit In-App-Kauf) überschreibt die Web-Dateien.
+          # Die Web-PWA im Repo-Hauptordner bleibt dadurch unverändert.
+          cp ios-web/index.html ios-web/app.js ios-web/styles.css www/
 
       - name: Sync Capacitor iOS platform
         script: npx cap sync ios
