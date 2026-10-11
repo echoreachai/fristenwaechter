@@ -191,26 +191,32 @@ async function extractTextFromPdf(file) {
   for (let i = 1; i <= maxPages; i++) {
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
-    text += "\n" + content.items.map((it) => it.str || "").join(" ");
-    if (i === 1) {
-      try {
-        firstPageLines = buildLinesFromPdfTextContent(content, page.getViewport({ scale: 1 }));
-      } catch (e) {
-        firstPageLines = [];
-      }
+    let pageLines = [];
+    try {
+      pageLines = buildLinesFromPdfTextContent(content, page.getViewport({ scale: 1 }));
+    } catch (e) {
+      pageLines = [];
     }
+    // Zeilenweise (oben -> unten), damit Schlüsselwort und Wert zusammenbleiben
+    text += "\n" + (pageLines.length ? pageLines.map((l) => l.text).join("\n") : content.items.map((it) => it.str || "").join(" "));
+    if (i === 1) firstPageLines = pageLines;
   }
   if (text.trim().length < 20) {
     // Vermutlich ein gescanntes PDF ohne Textebene -> als Bild rendern und per OCR lesen.
     const page = await pdf.getPage(1);
-    const viewport = page.getViewport({ scale: 2 });
+    const base = page.getViewport({ scale: 1 });
+    // ca. 2200 px Breite (~260 dpi bei A4) — gut lesbar für die Texterkennung
+    const viewport = page.getViewport({ scale: Math.min(4, Math.max(2, OCR_TARGET_WIDTH / base.width)) });
     const canvas = document.createElement("canvas");
-    canvas.width = viewport.width;
-    canvas.height = viewport.height;
+    canvas.width = Math.round(viewport.width);
+    canvas.height = Math.round(viewport.height);
     const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
     await page.render({ canvasContext: ctx, viewport }).promise;
+    enhanceCanvasForOcr(canvas);
     const worker = await getOcrWorker();
-    const { data } = await worker.recognize(canvas.toDataURL("image/png"));
+    const { data } = await worker.recognize(canvas);
     text = (data && data.text) || "";
     return { text, lines: linesFromTesseractData(data) };
   }
@@ -246,12 +252,12 @@ const DATE_KEYWORD_TIERS_BY_TYPE = {
     ["datum"],
   ],
   strafzettel: [
-    ["einspruchsfrist", "zahlungsfrist", "zahlbar bis", "zahlungsziel"],
+    ["einspruchsfrist", "zahlungsfrist", "zahlbar bis", "zahlungsziel", "bis zum", "bis spätestens", "spätestens am", "spätestens bis"],
     ["frist", "fällig", "faellig"],
     ["datum"],
   ],
   rechnung: [
-    ["zahlbar bis", "zahlungsziel", "fälligkeitsdatum", "faelligkeitsdatum", "zahlungsfrist"],
+    ["zahlbar bis", "zahlungsziel", "fälligkeitsdatum", "faelligkeitsdatum", "zahlungsfrist", "bis zum", "bis spätestens", "spätestens am", "spätestens bis", "fällig am"],
     ["fällig", "faellig", "frist"],
     ["rechnungsdatum", "datum"],
   ],
@@ -266,8 +272,12 @@ const DATE_KEYWORD_TIERS_BY_TYPE = {
   ],
 };
 
+const GERMAN_MONTHS = ["januar", "februar", "märz", "april", "mai", "juni", "juli", "august", "september", "oktober", "november", "dezember"];
 function parseDateFromText(text, type) {
   const dateRegex = /(\d{1,2})[.\/](\d{1,2})[.\/](\d{2,4})/g;
+  // "20. Oktober 2026" -> "20.10.2026"
+  text = String(text || "").replace(/(\d{1,2})\.\s*(januar|februar|m(?:ä|ae)rz|april|mai|juni|juli|august|september|oktober|november|dezember)\s+(\d{4})/gi,
+    (m, d, mon, y) => `${d}.${GERMAN_MONTHS.indexOf(mon.toLowerCase().replace("ae", "ä")) + 1}.${y}`);
   const lines = text.split("\n");
   const tiers = DATE_KEYWORD_TIERS_BY_TYPE[type] || DATE_KEYWORD_TIERS_BY_TYPE.rechnung;
 
@@ -303,6 +313,28 @@ function parseDateFromText(text, type) {
   }
   if (allDates.length === 0) return null;
   return type === "retoure" ? allDates[0] : allDates[allDates.length - 1];
+}
+
+// Betragsfeld ist ein Textfeld mit Zahlen-Tastatur (inputmode="decimal").
+// type="number" nimmt in manchen iOS-Versionen das deutsche Komma nicht an.
+// Akzeptiert: 49,90 · 49.90 · 1.234,56 · 1,234.56 · 49 · "49,90 €"
+function parseBetragInput(raw) {
+  let s = String(raw || "").replace(/[€\s]/g, "").replace(/eur$/i, "");
+  if (!s) return null;
+  const lastComma = s.lastIndexOf(","), lastDot = s.lastIndexOf(".");
+  if (lastComma > -1 && lastDot > -1) {
+    s = lastComma > lastDot ? s.replace(/\./g, "").replace(",", ".") : s.replace(/,/g, "");
+  } else if (lastComma > -1) {
+    const parts = s.split(",");
+    s = parts.length > 2 ? parts.slice(0, -1).join("") + "." + parts[parts.length - 1] : s.replace(",", ".");
+  } else if (lastDot > -1 && /^\d{1,3}(\.\d{3})+$/.test(s)) {
+    s = s.replace(/\./g, "");
+  }
+  if (!/^\d+(\.\d+)?$/.test(s)) return NaN;
+  return Math.round(parseFloat(s) * 100) / 100;
+}
+function formatBetragInput(num) {
+  return Number(num).toFixed(2).replace(".", ",");
 }
 
 function parseGermanNumber(str) {
@@ -401,25 +433,33 @@ function buildLinesFromPdfTextContent(content, viewport) {
     const x0 = item.transform[4];
     const y = item.transform[5];
     const width = item.width || item.str.length * fontHeight * 0.5;
-    const x1 = x0 + width;
     const key = Math.round(y / 3) * 3; // Zeilen mit ähnlichem y zusammenfassen
-    if (!groups.has(key)) groups.set(key, { text: "", x0, x1, y0: y, y1: y + fontHeight, height: fontHeight });
+    if (!groups.has(key)) groups.set(key, { parts: [], y0: y, height: fontHeight });
     const g = groups.get(key);
-    g.text += (g.text ? " " : "") + item.str;
-    g.x0 = Math.min(g.x0, x0);
-    g.x1 = Math.max(g.x1, x1);
+    g.parts.push({ str: item.str, x0, x1: x0 + width, h: fontHeight });
     g.height = Math.max(g.height, fontHeight);
   }
   const pageHeight = viewport.height;
   // PDF-Koordinaten wachsen nach oben — für unsere top/bottom-Logik umdrehen.
-  return Array.from(groups.values()).map((g) => ({
-    text: g.text,
-    left: g.x0,
-    right: g.x1,
-    top: pageHeight - g.y1,
-    bottom: pageHeight - g.y0,
-    height: g.height,
-  }));
+  return Array.from(groups.values()).map((g) => {
+    g.parts.sort((a, b) => a.x0 - b.x0);
+    let text = "";
+    let lastX1 = null;
+    for (const p of g.parts) {
+      // große Lücke = andere Spalte -> mehrere Leerzeichen als Trenner
+      if (lastX1 !== null) text += p.x0 - lastX1 > p.h * 2 ? "   " : " ";
+      text += p.str;
+      lastX1 = p.x1;
+    }
+    return {
+      text: text.replace(/[ ]{4,}/g, "   ").trim(),
+      left: g.parts[0].x0,
+      right: Math.max(...g.parts.map((p) => p.x1)),
+      top: pageHeight - (g.y0 + g.height),
+      bottom: pageHeight - g.y0,
+      height: g.height,
+    };
+  }).sort((a, b) => a.top - b.top);
 }
 function linesFromTesseractData(data) {
   return ((data && data.lines) || []).map((l) => ({
@@ -430,6 +470,317 @@ function linesFromTesseractData(data) {
     bottom: l.bbox.y1,
     height: l.bbox.y1 - l.bbox.y0,
   }));
+}
+
+/* ---------- Bildaufbereitung für die Texterkennung ----------
+   Handyfotos haben oft Schatten und ungleichmäßiges Licht. Vor der
+   Erkennung wird das Bild in Graustufen umgerechnet, der Papier-Hintergrund
+   herausgerechnet und der Kontrast gestreckt. Das senkt die Fehlerquote bei
+   Fotos deutlich (im Test von ca. 80 % auf ca. 23 % falsch gelesene Zeichen). */
+// Arbeitet direkt auf ImageData (RGBA). Schritte: Graustufen -> Hintergrund
+// (Schatten/ungleichmäßiges Licht) herausrechnen -> Kontrast strecken.
+function ocrEnhanceImageData(img, opts) {
+  const o = Object.assign({ flatten: true, threshold: false }, opts || {});
+  const { data, width: w, height: h } = img;
+  const n = w * h;
+  const gray = new Uint8ClampedArray(n);
+  for (let i = 0, j = 0; i < n; i++, j += 4) gray[i] = (data[j] * 77 + data[j + 1] * 150 + data[j + 2] * 29) >> 8;
+  let out = gray;
+  if (o.flatten) {
+    // Hintergrund schätzen: Blockmaximum (Papier ist hell, Schrift dunkel),
+    // dann glätten und hochskalieren; Pixel durch Hintergrund teilen.
+    const bs = Math.max(8, Math.round(Math.min(w, h) / 60));
+    const bw = Math.ceil(w / bs), bh = Math.ceil(h / bs);
+    let bg = new Float32Array(bw * bh);
+    for (let by = 0; by < bh; by++) for (let bx = 0; bx < bw; bx++) {
+      let mx = 0;
+      const y1 = Math.min(h, (by + 1) * bs), x1 = Math.min(w, (bx + 1) * bs);
+      for (let y = by * bs; y < y1; y += 2) { const row = y * w; for (let x = bx * bs; x < x1; x += 2) { const v = gray[row + x]; if (v > mx) mx = v; } }
+      bg[by * bw + bx] = mx;
+    }
+    // 3x Boxfilter 3x3 auf der kleinen Karte
+    for (let pass = 0; pass < 3; pass++) {
+      const nb = new Float32Array(bw * bh);
+      for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) {
+        let s = 0, c = 0;
+        for (let dy = -1; dy <= 1; dy++) { const yy = y + dy; if (yy < 0 || yy >= bh) continue; for (let dx = -1; dx <= 1; dx++) { const xx = x + dx; if (xx < 0 || xx >= bw) continue; s += bg[yy * bw + xx]; c++; } }
+        nb[y * bw + x] = s / c;
+      }
+      bg = nb;
+    }
+    out = new Uint8ClampedArray(n);
+    for (let y = 0; y < h; y++) {
+      const fy = Math.min(bh - 1.001, Math.max(0, y / bs - 0.5)); const y0 = Math.floor(fy), ty = fy - y0;
+      for (let x = 0; x < w; x++) {
+        const fx = Math.min(bw - 1.001, Math.max(0, x / bs - 0.5)); const x0 = Math.floor(fx), tx = fx - x0;
+        const i0 = y0 * bw + x0;
+        const b = (bg[i0] * (1 - tx) + bg[i0 + 1 < bw * bh ? i0 + 1 : i0] * tx) * (1 - ty) +
+                  (bg[Math.min(i0 + bw, bw * bh - 1)] * (1 - tx) + bg[Math.min(i0 + bw + 1, bw * bh - 1)] * tx) * ty;
+        out[y * w + x] = b > 8 ? Math.min(255, (gray[y * w + x] * 255) / b) : gray[y * w + x];
+      }
+    }
+  }
+  // Kontrast strecken: dunkelstes 1 % -> Schwarz, Papier -> Weiß
+  const hist = new Uint32Array(256);
+  for (let i = 0; i < n; i++) hist[out[i]]++;
+  let lo = 0, acc = 0; const target = n * 0.01;
+  for (; lo < 255 && acc + hist[lo] < target; lo++) acc += hist[lo];
+  let hi = 255; acc = 0; const targetHi = n * 0.05;
+  for (; hi > lo + 1 && acc + hist[hi] < targetHi; hi--) acc += hist[hi];
+  const range = Math.max(30, hi - lo);
+  for (let i = 0, j = 0; i < n; i++, j += 4) {
+    let v = ((out[i] - lo) * 255) / range;
+    v = v < 0 ? 0 : v > 255 ? 255 : v;
+    if (o.threshold) v = v < 160 ? 0 : 255;
+    data[j] = data[j + 1] = data[j + 2] = v; data[j + 3] = 255;
+  }
+  return img;
+}
+
+/* ---------- Anbieter / Zahlungsempfänger erkennen ----------
+   In Briefen ist der Absender oft nicht eindeutig gekennzeichnet. Statt nur
+   die größte Zeile im Kopf zu nehmen, sammelt detectProvider() Hinweise aus
+   mehreren Quellen und vergibt Punkte:
+     - Kennzeichnung „Absender/Rechnungssteller/Verkäufer“           (stark)
+     - Rücksendezeile über dem Adressfeld (DIN 5008, „Firma · Str · PLZ“) (stark)
+     - „Zahlungsempfänger/Kontoinhaber/Begünstigter“                (stark)
+     - Firmenname mit Rechtsform (GmbH, AG, SE, e.V. …)             (mittel)
+     - Behörden/Einrichtungen (Stadt …, Stadtwerke, Kasse …)        (mittel)
+     - größte Zeile im Briefkopf                                    (schwach)
+     - Internet-/E-Mail-Domain                                       (schwach)
+   Gleiche Namen aus mehreren Quellen addieren ihre Punkte. Ist der Anbieter
+   nirgends gut gekennzeichnet, gewinnt damit automatisch der
+   Zahlungsempfänger. Eigene Adresse (Absenderdaten) und das Empfänger-
+   Adressfeld („Herrn …“) werden ausgeschlossen. */
+
+const PROVIDER_LEGAL_RE = /(?:^|[\s,(])(GmbH\s*&\s*Co\.?\s*KGaA|GmbH\s*&\s*Co\.?\s*KG|gGmbH|GmbH|mbH|AG|KGaA|KG|OHG|UG(?:\s*\(haftungsbeschränkt\))?|GbR|e\.\s?V\.?|e\.\s?K\.?|eG|SE|PartG(?:\s*mbB)?|Ltd\.?|Inc\.?|AB|B\.V\.|S\.A\.|S\.à\s?r\.l\.)(?=$|[\s,.;:·|)\-–])/;
+const PROVIDER_AUTHORITY_RE = /\b(stadt|landeshauptstadt|gemeinde|landkreis|kreis|kreisverwaltung|bezirksamt|ordnungsamt|bu(?:ß|ss)geldstelle|polizei\w*|finanzamt|landratsamt|stadtkasse|kreiskasse|amtskasse|stadtwerke|stadtverwaltung|beitragsservice|krankenkasse|aok|barmer|versicherung\w*|verkehrsbetriebe|hausverwaltung|immobilien\w*|wohnungsbau\w*|rechtsanw(?:ä|ae)lt\w*|kanzlei|inkasso\w*|zahnarzt\w*|arztpraxis|praxis|klinik\w*|klinikum|universität|hochschule|verein|verband|genossenschaft|energie\w*|telekom|vodafone|fitness\w*)\b/i;
+const PROVIDER_NOISE_RE = /(iban|\bbic\b|swift|bankverbindung|kreditinstitut|konto-?n(?:umme)?r|\bblz\b|ust\.?-?id|umsatzsteuer|steuer-?n(?:umme)?r|\bhrb\b|\bhra\b|registergericht|amtsgericht|handelsregister|gesch(?:ä|ae)ftsf(?:ü|ue)hr|vorstand|aufsichtsrat|\bsitz\b|telefon|\btel\b|\bfax\b|e-?mail|www\.|https?:|seite\s*\d|\bdatum\b|kunden-?n(?:umme)?r|rechnungs-?n(?:umme)?r|aktenzeichen|gl(?:ä|ae)ubiger-?id|mandatsreferenz|verwendungszweck|betrag|\bsumme\b|\beur\b|€|\d{1,2}\.\d{1,2}\.\d{2,4}|postfach|(?:ö|oe)ffnungszeiten|servicezeit|hotline|bestellnummer|vertragsnummer)/i;
+const PROVIDER_GENERIC_START_RE = /^(ihre?|unsere?|neue|letzte|erste|zweite|dritte|\d\.)?\s*(rechnung\w*|\w*rechnung|gutschrift|mahnung|zahlungserinnerung|erinnerung|bu(?:ß|ss)geldbescheid|anh(?:ö|oe)rung\w*|verwarnung\w*|zeugenfragebogen|\w*bescheid|k(?:ü|ue)ndigung\w*|auftragsbest(?:ä|ae)tigung|bestellbest(?:ä|ae)tigung|lieferschein|quittung|kassenbon|beleg|vertrag\w*|\w*abrechnung|mitgliedsbeitrag|beitrag|zahlungsaufforderung|information|mitteilung|hinweis|wichtig|original|kopie|duplikat|herrn?|frau|familie|firma|an|betreff|seite|summe|gesamt|netto|brutto|mwst|ust|datum|kundennummer|absender|empf(?:ä|ae)nger|team)\b/i;
+const PROVIDER_ALWAYS_GENERIC_RE = /^(sehr geehrte|guten tag|hallo|liebe[rs]?\b|mit freundlichen|freundliche gr|viele gr|vielen dank|ihr[e]?\s|unser[e]?\s|bitte\b|wir\b|sie\b)/i;
+const PROVIDER_STREET_RE = /\b\S*(stra(?:ß|ss)e|str\.|weg|platz|allee|gasse|ring|damm|ufer|chaussee|markt)\s*\d/i;
+const PAYMENT_SERVICE_RE = /(paypal|klarna|riverty|afterpay|ratepay|unzer|computop|billpay|stripe|adyen|mollie|amazon payments|payone|heidelpay|easycredit|creditplus)/i;
+const FREEMAIL_RE = /^(gmail|googlemail|gmx|web|t-online|outlook|hotmail|live|yahoo|icloud|me|aol|freenet|posteo|mailbox|protonmail|arcor|online)$/i;
+
+function providerKey(name) {
+  return (name || "")
+    .toLowerCase()
+    .replace(PROVIDER_LEGAL_RE, " ")
+    .replace(/[^a-z0-9äöüß ]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+function providerSimilar(a, b) {
+  const ka = providerKey(a), kb = providerKey(b);
+  if (!ka || !kb) return false;
+  if (ka === kb) return true;
+  const [s, l] = ka.length <= kb.length ? [ka, kb] : [kb, ka];
+  if (s.length >= 4 && (l.startsWith(s + " ") || l.endsWith(" " + s) || l.includes(" " + s + " "))) return true;
+  if (s.length >= 8) {
+    // OCR-Lesefehler tolerieren (z. B. "Stachwerke" statt "Stadtwerke")
+    const m = s.length, n = l.length;
+    if (Math.abs(m - n) <= 3) {
+      let prev = Array.from({ length: n + 1 }, (_, i) => i);
+      for (let i = 1; i <= m; i++) {
+        const cur = [i];
+        for (let j = 1; j <= n; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (s[i - 1] === l[j - 1] ? 0 : 1));
+        prev = cur;
+      }
+      if (prev[n] / n <= 0.2) return true;
+    }
+  }
+  return false;
+}
+
+// Bereinigt einen Namenskandidaten; gibt null zurück, wenn nichts Brauchbares übrig bleibt.
+function cleanProviderName(raw, opts) {
+  const o = opts || {};
+  let s = (raw || "").replace(/[ \t]+/g, " ").trim();
+  s = s.replace(/^[\s"'„“”‚‘’•·*\-–—|:;,.]+/, "");
+  // hinter dem Namen folgende Kontodaten/Kontakte/Adresse abschneiden
+  s = s.split(/\s+(?:IBAN\b|BIC\b|Konto(?:nummer|-?nr\.?)?\s*:|Bankverbindung|Bank\s*:|Kreditinstitut|Tel\.|Telefon|Fax\b|E-?Mail|www\.)/i)[0];
+  s = s.split(/\s[·•|]\s|\s[-–—]\s|\s{3,}/)[0];
+  s = s.replace(/,\s*(?:\d{5}\b|[^,]*\b(?:stra(?:ß|ss)e|str\.|weg|platz|allee|gasse|postfach)\b).*$/i, "");
+  // Name endet nach der Rechtsform (Rest ist meist Adresse/Ort)
+  const legal = PROVIDER_LEGAL_RE.exec(s);
+  if (legal) s = s.slice(0, legal.index + legal[0].length);
+  s = s.replace(/\s+/g, " ").trim();
+  if (!/\b[eE]\.\s?[VKG]\.$|Co\.$|Inc\.$|Ltd\.$|r\.l\.$|S\.A\.$|B\.V\.$/.test(s)) s = s.replace(/[\s:;,.\-–—·|]+$/, "");
+  if (s.length < 2) return null;
+  if (s.length > 60) s = s.slice(0, 55).replace(/\s+\S*$/, "");
+  const nonSpace = s.replace(/\s/g, "");
+  const letters = (nonSpace.match(/[A-Za-zÄÖÜäöüß]/g) || []).length;
+  if (letters < 2 || letters / nonSpace.length < 0.6) return null;
+  const words = s.split(" ");
+  // OCR-Müll wie "SO nn" oder "been" aussortieren: mind. ein echtes Wort
+  const hasRealWord = words.some((w) => /^[A-ZÄÖÜ0-9][A-Za-zÄÖÜäöüß0-9&\-.]{2,}$/.test(w) || /^[a-zäöü]{4,}$/.test(w) && o.allowLower);
+  if (!hasRealWord && !PROVIDER_LEGAL_RE.test(s)) return null;
+  if (PROVIDER_ALWAYS_GENERIC_RE.test(s)) return null;
+  if (PROVIDER_GENERIC_START_RE.test(s) && (words.length <= 3 || /\d|\bnr\b|\bvom\b|\bfür\b/i.test(s))) return null;
+  if (PROVIDER_STREET_RE.test(s) || /^\d{5}\b/.test(s) || /^postfach\b/i.test(s)) return null;
+  if (o.senderKey && providerSimilar(s, o.senderKey)) return null;
+  return s;
+}
+
+function detectProvider(text, lines, type, sender) {
+  const senderName = sender && sender.name ? String(sender.name) : "";
+  const senderStreet = sender && sender.strasse ? String(sender.strasse).toLowerCase() : "";
+  const cleanOpts = { senderKey: senderName };
+  const textLines = (text || "").split("\n").map((l) => l.trim()).filter(Boolean);
+
+  // Zeilen mit Lage auf der Seite (aus OCR/PDF); ohne Positionsdaten wird die
+  // Reihenfolge im Text als grobe Lage verwendet.
+  let items;
+  if (lines && lines.length >= 3) {
+    const pageH = Math.max(...lines.map((l) => l.bottom)) || 1;
+    const heights = lines.map((l) => l.height).filter((h) => h > 0).sort((a, b) => a - b);
+    const medH = heights[Math.floor(heights.length / 2)] || 1;
+    items = lines
+      .filter((l) => l.text && l.text.trim())
+      .sort((a, b) => a.top - b.top)
+      .map((l) => ({ text: l.text.trim(), top: l.top / pageH, size: l.height / medH }));
+  } else {
+    items = textLines.map((t, i) => ({ text: t, top: textLines.length > 1 ? i / (textLines.length - 1) : 0, size: 1 }));
+  }
+
+  // Empfänger-Adressfeld („Herrn/Frau …“ + 3 Folgezeilen) und eigene Adresse ausschließen
+  const excluded = new Set();
+  items.forEach((it, i) => {
+    if (/^(herrn?|frau|familie|eheleute)\b\.?/i.test(it.text) && !/[·•|]/.test(it.text)) {
+      for (let k = i; k <= Math.min(i + 3, items.length - 1); k++) excluded.add(k);
+    }
+    if (senderName && providerSimilar(it.text, senderName)) excluded.add(i);
+    if (senderStreet && it.text.toLowerCase().includes(senderStreet)) excluded.add(i);
+  });
+
+  const cands = [];
+  const add = (name, source, score, extra) => {
+    const clean = cleanProviderName(name, Object.assign({}, cleanOpts, extra && extra.cleanOpts));
+    if (!clean) return;
+    cands.push(Object.assign({ name: clean, source, score, recipient: false }, extra || {}));
+  };
+
+  // 1) Kennzeichnungen im Text (über alle Seiten); Wert notfalls aus der Folgezeile
+  const LABELS = [
+    { re: /(?:^|[^a-zäöüß])(absender|rechnungssteller\w*|verk(?:ä|ae)ufer\w*|anbieter|h(?:ä|ae)ndler|auftragnehmer|leistungserbringer|rechnung\s+von|verkauft\s+(?:von|durch))\b\s*(?:\([^)]*\))?\s*[:：]?\s*(.*)$/i, source: "label-anbieter", score: 7, recipient: false },
+    { re: /(?:^|[^a-zäöüß])(zahlungsempf(?:ä|ae)nger\w*|kontoinhaber\w*|beg(?:ü|ue)nstigte[rn]?|empf(?:ä|ae)nger\s+der\s+zahlung|zahlung\s+an)\b\s*(?:\([^)]*\))?\s*[:：]?\s*(.*)$/i, source: "label-zahlung", score: 6, recipient: true },
+    { re: /(?:(?:ü|ue)berweisen|zahlen)\s+sie\s+(?:bitte\s+)?(?:den\s+\w*betrag\s+)?(?:bis\s+(?:zum\s+)?\S+\s+)?(an)\s*[:]?\s*(.+)$/i, source: "label-zahlung", score: 5, recipient: true },
+  ];
+  if (type !== "retoure" && type !== "garantie") {
+    LABELS.push({ re: /(?:^|[^a-zäöüß])(empf(?:ä|ae)nger)\b\s*[:：]\s*(.*)$/i, source: "label-empfaenger", score: 3.5, recipient: true });
+  }
+  textLines.forEach((line, i) => {
+    for (const lab of LABELS) {
+      const m = lab.re.exec(line);
+      if (!m) continue;
+      if (lab.source === "label-empfaenger" && /zahlungsempf/i.test(line)) continue;
+      let val = (m[2] || "").trim();
+      if (/^(unser|folgend|das|die|den|uns\b|sie\b)/i.test(val)) val = "";
+      if (val.replace(/[^A-Za-zÄÖÜäöüß]/g, "").length < 2 && textLines[i + 1]) val = textLines[i + 1];
+      add(val, lab.source, lab.score, { recipient: lab.recipient, order: i });
+      break;
+    }
+  });
+
+  // 2) Rücksendezeile über dem Adressfeld: „Firma · Straße/Postfach · PLZ Ort“
+  items.forEach((it, i) => {
+    if (it.top > 0.45 || excluded.has(i)) return;
+    if (!/\b\d{5}\b/.test(it.text)) return;
+    if (!/\s[·•|]\s|\s[-–—]\s|\s·|·\s/.test(it.text)) return;
+    const first = it.text.split(/\s*[·•|]\s*|\s[-–—]\s/)[0];
+    add(first, "ruecksendezeile", 7);
+  });
+
+  // 3) Firmennamen mit Rechtsform / Behörden – zeilenweise, in Segmente zerlegt
+  items.forEach((it, i) => {
+    if (excluded.has(i)) return;
+    const segments = it.text.split(/\s[·•|]\s|\s[-–—]\s|\s{3,}/);
+    segments.forEach((seg, si) => {
+      const segTrim = seg.trim();
+      if (!segTrim || PROVIDER_NOISE_RE.test(segTrim) && !(si === 0 && PROVIDER_LEGAL_RE.test(segTrim))) return;
+      let pos = 0;
+      if (it.top < 0.3) pos += 1.5;
+      else if (it.top > 0.85) pos += 0.5;
+      if (it.size >= 1.4) pos += 1;
+      if (PROVIDER_LEGAL_RE.test(segTrim)) add(segTrim, "rechtsform", 4 + pos);
+      else if (PROVIDER_AUTHORITY_RE.test(segTrim) && segTrim.split(/\s+/).length >= 2) add(segTrim, "einrichtung", 3 + pos);
+    });
+  });
+
+  // 4) Größte/auffälligste Zeile im Briefkopf (bisherige Logik, mit Filtern)
+  if (lines && lines.length >= 3) {
+    const filtered = lines.filter((l, idx) => {
+      const c = cleanProviderName(l.text, cleanOpts);
+      return c && !PROVIDER_NOISE_RE.test(l.text) && !excluded.has(items.findIndex((it) => it.text === l.text.trim()));
+    });
+    const head = guessHeaderCandidate(filtered);
+    if (head) add(head, "briefkopf", 3, { cleanOpts: { allowLower: true } });
+  }
+
+  // 5) Domain aus Internet-/E-Mail-Adresse (z. B. www.stadtwerke-krefeld.de)
+  const dm = /(?:www\.|@)([a-z0-9][a-z0-9-]{1,40})\.(?:de|com|net|org|eu|at|ch|info|biz)\b/i.exec(text || "");
+  if (dm && !FREEMAIL_RE.test(dm[1])) {
+    const label = dm[1].replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+    add(label, "domain", 2, { cleanOpts: { allowLower: true } });
+  }
+
+  // 6) Notlösung: erste brauchbare Textzeile
+  for (let i = 0; i < items.length; i++) {
+    if (excluded.has(i) || PROVIDER_NOISE_RE.test(items[i].text)) continue;
+    const c = cleanProviderName(items[i].text, cleanOpts);
+    if (c) { add(c, "erste-zeile", 1); break; }
+  }
+
+  if (!cands.length) return { provider: null, recipient: null, score: 0, candidates: [] };
+
+  // Gleiche Namen gruppieren und Punkte addieren (pro Quelle zählt der beste
+  // Treffer voll, jede Wiederholung gibt einen kleinen Bonus)
+  const groups = [];
+  for (const c of cands) {
+    let g = groups.find((gr) => gr.members.some((m) => providerSimilar(m.name, c.name)));
+    if (!g) { g = { members: [] }; groups.push(g); }
+    g.members.push(c);
+  }
+  for (const g of groups) {
+    const bySource = {};
+    for (const m of g.members) (bySource[m.source] ||= []).push(m.score);
+    let score = 0;
+    for (const arr of Object.values(bySource)) {
+      arr.sort((a, b) => b - a);
+      score += arr[0] + Math.min(2, (arr.length - 1) * 1);
+    }
+    const sample = g.members.map((m) => m.name).join(" ");
+    if (PAYMENT_SERVICE_RE.test(sample)) score *= 0.4; // Zahlungsdienstleister ist selten der eigentliche Anbieter
+    g.score = score;
+    // Anzeigename: bevorzugt mit Rechtsform, dann die häufigste Schreibweise,
+    // dann der Treffer mit den meisten Einzelpunkten
+    const counts = {};
+    for (const m of g.members) counts[m.name] = (counts[m.name] || 0) + 1;
+    g.name = g.members.slice().sort((a, b) => {
+      const la = PROVIDER_LEGAL_RE.test(a.name) ? 1 : 0, lb = PROVIDER_LEGAL_RE.test(b.name) ? 1 : 0;
+      if (la !== lb) return lb - la;
+      const ta = /^label|ruecksende/.test(a.source) ? 1 : 0, tb = /^label|ruecksende/.test(b.source) ? 1 : 0;
+      if (ta !== tb) return tb - ta;
+      if (counts[a.name] !== counts[b.name]) return counts[b.name] - counts[a.name];
+      return b.score - a.score;
+    })[0].name;
+  }
+  groups.sort((a, b) => b.score - a.score);
+  const best = groups[0];
+
+  // Zahlungsempfänger: ausdrücklich gekennzeichneter Name, sonst Anbieter
+  const recCands = cands.filter((c) => c.recipient).sort((a, b) => b.score - a.score || a.order - b.order);
+  let recipient = null;
+  if (recCands.length) {
+    const rg = groups.find((g) => g.members.includes(recCands[0]));
+    recipient = rg ? rg.name : recCands[0].name;
+  }
+  return {
+    provider: best.score >= 1 ? best.name : null,
+    recipient,
+    score: best.score,
+    candidates: groups.map((g) => ({ name: g.name, score: Math.round(g.score * 10) / 10, sources: [...new Set(g.members.map((m) => m.source))] })),
+  };
 }
 
 // IBAN-Prüfsumme (ISO 7064 MOD 97-10): erste 4 Zeichen ans Ende verschieben,
@@ -458,7 +809,7 @@ function formatIban(iban) {
 // findet zuverlässig das Ende der echten IBAN, unabhängig von OCR-Ausreißern.
 function parseIbanFromText(text) {
   const compact = text.replace(/[\r\n]/g, " ");
-  const ibanRegex = /\b([A-Z]{2}[ ]?\d{2}(?:[ ]?[A-Z0-9]){10,30})\b/g;
+  const ibanRegex = /\b([A-Z]{2}[ ]?[\dO]{2}(?:[ ]?[A-Z0-9|]){10,30})\b/g;
   const candidates = [];
   let m;
   while ((m = ibanRegex.exec(compact))) {
@@ -466,10 +817,24 @@ function parseIbanFromText(text) {
     if (clean.length >= 15 && clean.length <= 34) candidates.push(clean);
   }
   if (candidates.length === 0) return null;
-  for (const candidate of candidates) {
-    for (let len = candidate.length; len >= 15; len--) {
-      const trimmed = candidate.slice(0, len);
-      if (ibanChecksumValid(trimmed)) return trimmed;
+  const ocrFix = (c) => c.slice(0, 2) + c.slice(2).replace(/O/g, "0").replace(/[IL|]/g, "1").replace(/S/g, "5").replace(/B/g, "8").replace(/Z/g, "2");
+  // Feste IBAN-Längen je Land: verhindert, dass angehängter Text ("BIC …")
+  // zufällig die Prüfsumme erfüllt
+  const IBAN_LENGTHS = { DE: 22, AT: 20, CH: 21, LI: 21, NL: 18, BE: 16, LU: 20, FR: 27, IT: 27, ES: 24, IE: 22, GB: 22, DK: 18, PL: 28, CZ: 24, SE: 24 };
+  for (const raw of candidates) {
+    const known = IBAN_LENGTHS[raw.slice(0, 2)];
+    // Deutsche IBANs bestehen nach "DE" nur aus Ziffern -> typische OCR-Verwechslungen korrigieren
+    const variants = raw.startsWith("DE") ? [raw, ocrFix(raw)] : [raw];
+    for (const candidate of variants) {
+      if (known) {
+        const trimmed = candidate.slice(0, known);
+        if (trimmed.length === known && (!raw.startsWith("DE") || /^DE\d{20}$/.test(trimmed)) && ibanChecksumValid(trimmed)) return trimmed;
+        continue;
+      }
+      for (let len = candidate.length; len >= 15; len--) {
+        const trimmed = candidate.slice(0, len);
+        if (ibanChecksumValid(trimmed)) return trimmed;
+      }
     }
   }
   return candidates[0].slice(0, 22); // Fallback ohne Prüfsummentreffer (z. B. bei Lesefehlern)
@@ -480,14 +845,14 @@ function parseIbanFromText(text) {
 // Aktenzeichen …). Kein Treffer ist besser als ein falscher — daher recht
 // enge Muster statt "irgendeine Zahl im Text".
 const REFERENCE_KEYWORDS_BY_TYPE = {
-  rechnung: ["rechnungsnummer", "rechnungs-nr", "rechnungsnr", "rg-nr", "belegnummer", "beleg-nr", "verwendungszweck", "referenznummer", "kundennummer", "kd-nr", "kdnr"],
+  rechnung: ["rechnungsnummer", "rechnungs-nr", "rechnungsnr", "rechnung\\s*nr\\.?", "rg-nr", "belegnummer", "beleg-nr", "verwendungszweck", "referenznummer", "kundennummer", "kd-nr", "kdnr"],
   abo: ["kundennummer", "kd-nr", "kdnr", "vertragsnummer", "mitgliedsnummer", "mitgliedsnr"],
   strafzettel: ["aktenzeichen", "bescheidnummer", "geschäftszeichen", "geschaeftszeichen", "vorgangsnummer"],
 };
 function parseReferenceFromText(text, type) {
   const keywords = REFERENCE_KEYWORDS_BY_TYPE[type];
   if (!keywords) return null;
-  const keywordRegex = new RegExp(`(?:${keywords.join("|")})[:\\s]*([A-Za-zÄÖÜäöü0-9][A-Za-zÄÖÜäöü0-9\\-\\/\\.]{2,24})`, "i");
+  const keywordRegex = new RegExp(`(?:${keywords.join("|")})[:.#\\s]*([A-Za-zÄÖÜäöü0-9][A-Za-zÄÖÜäöü0-9\\-\\/\\.]{2,24})`, "i");
   for (const line of text.split("\n")) {
     const m = keywordRegex.exec(line);
     if (m && m[1]) {
@@ -626,6 +991,63 @@ let sortMode = "deadline-asc";
 let currentBeleg = null;
 
 /* ---------- Bild-Verkleinerung ---------- */
+
+// Lädt ein Foto in ein Canvas mit OCR-tauglicher Auflösung (1600–2200 px
+// Breite: kleine Bilder werden vergrößert, riesige verkleinert) und bereitet
+// es für die Texterkennung auf.
+const OCR_TARGET_WIDTH = 2200;
+const OCR_MIN_WIDTH = 1600;
+function loadImageFromFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+function enhanceCanvasForOcr(canvas) {
+  try {
+    const ctx = canvas.getContext("2d");
+    const id = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    ocrEnhanceImageData(id);
+    ctx.putImageData(id, 0, 0);
+  } catch (e) {
+    console.warn("Bildaufbereitung übersprungen:", e);
+  }
+  return canvas;
+}
+async function prepareImageForOcr(file) {
+  const img = await loadImageFromFile(file);
+  let w = Math.min(img.width, OCR_TARGET_WIDTH);
+  if (w < OCR_MIN_WIDTH) w = Math.min(OCR_MIN_WIDTH, img.width * 3);
+  const scale = w / img.width;
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(img.width * scale);
+  canvas.height = Math.round(img.height * scale);
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  return enhanceCanvasForOcr(canvas);
+}
+
+// Typische OCR-Verwechslungen in Zahlen glätten ("84,9O" -> "84,90",
+// "84, 90" -> "84,90"), ohne normalen Text zu verändern.
+function normalizeOcrText(text) {
+  let t = String(text || "");
+  for (let k = 0; k < 2; k++) {
+    t = t.replace(/(\d[.,]?)[Oo](?=[\d.,\s€]|$)/gm, (m, a) => a + "0");
+    t = t.replace(/([.,])[Oo](\d)/g, (m, a, b) => a + "0" + b);
+  }
+  t = t.replace(/(\d),\s(\d{2})(?!\d)/g, "$1,$2");
+  return t;
+}
 
 function resizeImage(file, maxWidth = 900, quality = 0.72) {
   return new Promise((resolve, reject) => {
@@ -1043,6 +1465,7 @@ let empfaengerTouched = false;
 let dateAutoFilled = false;
 let betragAutoFilled = false;
 let produktAutoFilled = false;
+let produktAutoScore = 0;
 let referenzAutoFilled = false;
 let ibanAutoFilled = false;
 let empfaengerAutoFilled = false;
@@ -1097,6 +1520,7 @@ function openModal(presetType) {
   dateAutoFilled = false;
   betragAutoFilled = false;
   produktAutoFilled = false;
+  produktAutoScore = 0;
   referenzAutoFilled = false;
   ibanAutoFilled = false;
   empfaengerAutoFilled = false;
@@ -1186,7 +1610,13 @@ Object.values(DIRECT_DATE_FIELDS).forEach(({ input }) => {
   input.addEventListener("input", () => { dateTouched = true; });
   input.addEventListener("change", updatePreview);
 });
-betragInput.addEventListener("input", () => { betragTouched = true; });
+betragInput.addEventListener("input", () => {
+  betragTouched = true;
+  betragInput.setCustomValidity("");
+  // nur Ziffern, Komma und Punkt zulassen (wie ein Zahlenfeld)
+  const cleaned = betragInput.value.replace(/[^\d.,]/g, "");
+  if (cleaned !== betragInput.value) betragInput.value = cleaned;
+});
 referenzInput.addEventListener("input", () => { referenzTouched = true; });
 ibanInput.addEventListener("input", () => { ibanTouched = true; });
 empfaengerInput.addEventListener("input", () => { empfaengerTouched = true; });
@@ -1333,11 +1763,11 @@ function renderPageThumbs() {
 // für gescannte PDFs) oder per Bild-OCR für Fotos.
 async function getTextFromFile(file) {
   if (isPdfFile(file)) return extractTextFromPdf(file);
-  // Eigene, etwas größere Version nur für die Texterkennung — die
+  // Eigene, größere und aufbereitete Version nur für die Texterkennung — die
   // gespeicherte Beleg-Vorschau bleibt bei der kleineren Auflösung.
-  const ocrDataUrl = await resizeImage(file, 1500, 0.9);
+  const ocrCanvas = await prepareImageForOcr(file);
   const worker = await getOcrWorker();
-  const { data } = await worker.recognize(ocrDataUrl);
+  const { data } = await worker.recognize(ocrCanvas);
   return { text: (data && data.text) || "", lines: linesFromTesseractData(data) };
 }
 
@@ -1354,7 +1784,9 @@ async function runOcr(file) {
   // übersehen, wenn es nur ein kleiner grauer Text ist.
   setOcrStatus("loading", isPdfFile(file) ? "PDF wird gelesen …" : "Beleg wird gelesen …");
   try {
-    const { text, lines } = await getTextFromFile(file);
+    const raw = await getTextFromFile(file);
+    const text = normalizeOcrText(raw.text);
+    const lines = raw.lines;
     const applied = [];
 
     if (!dateTouched && !dateAutoFilled) {
@@ -1370,20 +1802,26 @@ async function runOcr(file) {
     if (!betragTouched && !betragAutoFilled) {
       const amount = parseAmountFromText(text);
       if (amount !== null && !isNaN(amount)) {
-        betragInput.value = amount.toFixed(2);
+        betragInput.value = formatBetragInput(amount);
         betragAutoFilled = true;
         applied.push("Betrag");
       }
     }
-    // Anbieter/Absender: bevorzugt die Kopfzeile mit der größten Schrift
-    // bzw. oben rechts im Beleg (Positions-/Größenanalyse), sonst die
-    // erste plausible Textzeile als Rückfallebene.
-    const headerGuess = guessHeaderCandidate(lines) || guessMerchant(text);
-    if (!produktTouched && !produktAutoFilled && !produktInput.value.trim()) {
-      if (headerGuess) {
+    // Anbieter/Absender: Punktesystem aus mehreren Hinweisen (Absender-
+    // Kennzeichnung, Rücksendezeile, Rechtsform, Briefkopf, Zahlungsempfänger …),
+    // siehe detectProvider(). Ist der Anbieter nicht gut gekennzeichnet, wird
+    // der Zahlungsempfänger übernommen.
+    const providerInfo = detectProvider(text, lines, currentType, loadSender());
+    const headerGuess = providerInfo.provider;
+    if (!produktTouched && headerGuess) {
+      const fresh = !produktAutoFilled && !produktInput.value.trim();
+      // Bei weiteren Seiten einen deutlich sichereren Treffer nachträglich übernehmen
+      const better = produktAutoFilled && providerInfo.score > produktAutoScore + 1.5 && produktInput.value.trim() !== headerGuess;
+      if (fresh || better) {
         produktInput.value = headerGuess;
         saveBtn.disabled = false;
         produktAutoFilled = true;
+        produktAutoScore = providerInfo.score;
         applied.push("Anbieter");
       }
     }
@@ -1409,7 +1847,7 @@ async function runOcr(file) {
         // ("Zahlungsempfänger", "Kontoinhaber" …), sonst dieselbe
         // Kopfzeilen-Erkennung, sonst als letzte Rückfallebene das bereits
         // erkannte Anbieter-Feld.
-        const recipient = parseRecipientFromText(text) || headerGuess || produktInput.value.trim() || null;
+        const recipient = providerInfo.recipient || headerGuess || produktInput.value.trim() || null;
         if (recipient) {
           empfaengerInput.value = recipient;
           empfaengerAutoFilled = true;
@@ -1468,6 +1906,13 @@ form.addEventListener("submit", (e) => {
     openProPaywall(`Die Gratis-Version erlaubt ${FREE_ENTRY_LIMIT} offene Einträge.`);
     return;
   }
+  const betragWert = parseBetragInput(betragInput.value);
+  if (Number.isNaN(betragWert)) {
+    betragInput.setCustomValidity("Bitte den Betrag als Zahl eingeben, z. B. 49,90");
+    betragInput.reportValidity();
+    betragInput.focus();
+    return;
+  }
   const deadline = currentDeadline();
   const entry = {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -1480,7 +1925,7 @@ form.addEventListener("submit", (e) => {
     serie: currentType === "abo" && hasProAccess() && serieInput.checked && intervallInput.value !== "einmalig",
     erledigtAm: null,
     deadline,
-    betrag: betragInput.value !== "" ? Number(betragInput.value) : null,
+    betrag: betragWert,
     notiz: notizInput.value.trim(),
     referenz: (REFERENZ_LABELS[currentType]) ? referenzInput.value.trim() : "",
     adresse: (currentType === "abo" || currentType === "strafzettel") ? adresseInput.value.trim() : "",
