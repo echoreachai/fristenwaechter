@@ -2,7 +2,9 @@
   "dependencies": {
     "@capacitor/cli": "^8.5.0",
     "@capacitor/core": "^8.5.0",
+    "@capacitor/filesystem": "8.1.4",
     "@capacitor/ios": "^8.5.0",
+    "@capacitor/share": "8.0.3",
     "@capgo/native-purchases": "8.8.1"
   }
 }

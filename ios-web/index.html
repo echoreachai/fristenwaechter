@@ -2,7 +2,8 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <!-- iOS-App: kein Seiten-Zoom (WKWebView blieb nach dem Reinzoomen hängen). Belege lassen sich im Beleg-Viewer per Tippen vergrößern. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
   <title>Fristen-Wächter</title>
   <meta name="description" content="Retouren- & Kündigungsfristen im Blick — lokal & ohne Postfach-Suche." />
   <meta name="theme-color" content="#1D2B3A" />
@@ -231,8 +232,12 @@
   <!-- Beleg-Viewer -->
   <div class="fw-viewer-overlay" id="fw-viewer-overlay" style="display:none">
     <div class="fw-viewer-box">
-      <button class="fw-viewer-close" id="fw-viewer-close">✕</button>
+      <button class="fw-viewer-close" id="fw-viewer-close" aria-label="Schließen">✕</button>
       <div id="fw-viewer-content"></div>
+      <div class="fw-viewer-actions">
+        <span class="fw-hint" id="fw-viewer-hint"></span>
+        <button type="button" class="fw-action" id="fw-viewer-share" style="display:none">📤 Teilen / Öffnen</button>
+      </div>
     </div>
   </div>
 

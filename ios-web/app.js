@@ -51,6 +51,54 @@ let proUntil = null;
 function isPro() {
   return proActive;
 }
+
+/* ---------- Dateien ausgeben (PDF-Schreiben, Backup, Belege) ----------
+   Die iOS-Webansicht (WKWebView) kann keine Browser-Downloads ("<a download>"
+   bzw. jsPDF doc.save) — dort passierte beim Tippen einfach nichts. In der
+   iOS-App wird die Datei deshalb im App-Cache gespeichert und über das
+   iOS-Teilen-Menü angeboten (Sichern in „Dateien“, Drucken, Mail, AirDrop …).
+   Im Browser/Android bleibt es beim normalen Download. */
+const NativeFs = IS_IOS_APP ? window.Capacitor.registerPlugin("Filesystem") : null;
+const NativeShare = IS_IOS_APP ? window.Capacitor.registerPlugin("Share") : null;
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(",")[1] || "");
+    r.onerror = reject;
+    r.readAsDataURL(blob);
+  });
+}
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+async function deliverFile(blob, filename, title) {
+  if (!NativeFs || !NativeShare) {
+    downloadBlob(blob, filename);
+    return;
+  }
+  const data = await blobToBase64(blob);
+  const res = await NativeFs.writeFile({ path: filename, data, directory: "CACHE" });
+  try {
+    await NativeShare.share({ title: title || filename, files: [res.uri] });
+  } catch (err) {
+    if (/cancel/i.test(String((err && err.message) || err))) return; // Nutzer hat das Menü geschlossen
+    throw err;
+  }
+}
+function fileErrorMessage(err) {
+  const msg = String((err && err.message) || err || "");
+  if (/not implemented|unimplemented|not available/i.test(msg)) {
+    return "Diese App-Version kann noch keine Dateien teilen. Bitte installiere das neueste Update.";
+  }
+  return "Die Datei konnte nicht geteilt werden. Bitte versuche es erneut.";
+}
 function hasProAccess() {
   return !PRO_GATING_ENABLED || isPro();
 }
@@ -2008,15 +2056,17 @@ function openViewer(beleg) {
     viewerBox.appendChild(iframe);
   } else if (isRealImage) {
     const wrap = document.createElement("div");
+    wrap.className = "fw-viewer-scroll";
     wrap.style.display = "flex";
     wrap.style.flexDirection = "column";
     wrap.style.gap = "10px";
-    wrap.style.maxHeight = "78vh";
-    wrap.style.overflowY = "auto";
     safeImagePages.forEach((src) => {
       const img = document.createElement("img");
       img.src = src;
       img.className = "fw-viewer-img";
+      img.alt = "Beleg";
+      // Zoom per Tippen (Seiten-Zoom ist in der iOS-App abgeschaltet)
+      img.addEventListener("click", () => img.classList.toggle("is-zoomed"));
       wrap.appendChild(img);
     });
     viewerBox.appendChild(wrap);
@@ -2028,8 +2078,31 @@ function openViewer(beleg) {
       : `Datei zu groß für die lokale Vorschau: ${beleg.name}`;
     viewerBox.appendChild(p);
   }
+  const hint = $("#fw-viewer-hint");
+  const shareBtn = $("#fw-viewer-share");
+  hint.textContent = isRealImage && !isRealPdf ? "Zum Vergrößern aufs Bild tippen." : "";
+  // In der iOS-App zeigt die Webansicht PDFs nur eingeschränkt an -> Teilen/Öffnen anbieten
+  shareBtn.style.display = IS_IOS_APP && (isRealPdf || isRealImage) ? "" : "none";
   viewerOverlay.style.display = "flex";
 }
+$("#fw-viewer-share").addEventListener("click", async () => {
+  if (!currentBeleg) return;
+  try {
+    const isPdf = typeof currentBeleg.dataUrl === "string" && currentBeleg.dataUrl.startsWith("data:application/pdf");
+    const src = isPdf ? currentBeleg.dataUrl : (Array.isArray(currentBeleg.pages) && currentBeleg.pages[0]) || currentBeleg.dataUrl;
+    if (isPdf) {
+      if (!src) return;
+    } else if (!sanitizeImageDataUrl(src)) {
+      return;
+    }
+    const blob = await (await fetch(src)).blob();
+    const base = (currentBeleg.name || "Beleg").replace(/\.[a-z0-9]+$/i, "").replace(/[^\w\-]+/g, "_").slice(0, 40) || "Beleg";
+    await deliverFile(blob, `${base}.${isPdf ? "pdf" : "jpg"}`, "Beleg");
+  } catch (err) {
+    console.warn("Beleg teilen fehlgeschlagen:", err);
+    window.alert(fileErrorMessage(err));
+  }
+});
 $("#fw-viewer-close").addEventListener("click", () => { viewerOverlay.style.display = "none"; });
 viewerOverlay.addEventListener("mousedown", (e) => { if (e.target === viewerOverlay) viewerOverlay.style.display = "none"; });
 
@@ -2231,17 +2304,11 @@ $("#export-confirm").addEventListener("click", async () => {
       ? await encryptBackupData(entries, exportPw.value)
       : { app: BACKUP_APP_ID, version: 1, encrypted: false, data: entries };
     const blob = new Blob([JSON.stringify(wrapper)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `fristen-waechter-backup-${toISO(new Date())}.json`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+    await deliverFile(blob, `fristen-waechter-backup-${toISO(new Date())}.json`, "Fristen-Wächter Backup");
     exportOverlay.style.display = "none";
   } catch (e) {
-    exportError.textContent = "Backup konnte nicht erstellt werden.";
+    console.warn("Backup-Export fehlgeschlagen:", e);
+    exportError.textContent = IS_IOS_APP ? fileErrorMessage(e) : "Backup konnte nicht erstellt werden.";
     exportError.style.display = "block";
   }
 });
@@ -2777,7 +2844,15 @@ function generateLetterPdf(entry) {
 
   const prefix = isAbo ? "Kuendigung" : "Einspruch";
   const safeName = entry.produkt.replace(/[^\w\-]+/g, "_").replace(/_+/g, "_").slice(0, 40) || "Schreiben";
-  doc.save(`${prefix}_${safeName}.pdf`);
+  const pdfName = `${prefix}_${safeName}.pdf`;
+  if (!IS_IOS_APP) {
+    doc.save(pdfName);
+    return;
+  }
+  deliverFile(doc.output("blob"), pdfName, isAbo ? "Kündigungsschreiben" : "Einspruchsschreiben").catch((err) => {
+    console.warn("Schreiben konnte nicht geteilt werden:", err);
+    window.alert(fileErrorMessage(err));
+  });
 }
 
 /* ---------- Alternativen-Vergleich (nur per Button, keine Automatik) ----------

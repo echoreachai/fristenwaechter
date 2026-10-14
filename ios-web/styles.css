@@ -720,3 +720,10 @@ body{
 /* Weitere Belegseiten: Kamera und Galerie getrennt */
 .fw-addpage-row{ display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .fw-addpage-row .fw-action{ font-size: 12px; padding: 8px 12px; }
+
+/* Beleg-Viewer: Zoom per Tippen statt Seiten-Zoom */
+.fw-viewer-img{ cursor: zoom-in; touch-action: pan-x pan-y; }
+.fw-viewer-img.is-zoomed{ max-width: none; max-height: none; width: 230%; cursor: zoom-out; }
+.fw-viewer-scroll{ overflow: auto; -webkit-overflow-scrolling: touch; max-height: 74vh; max-width: 86vw; }
+.fw-viewer-actions{ display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; }
+.fw-viewer-actions .fw-action{ font-size: 13px; padding: 8px 12px; }
