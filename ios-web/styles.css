@@ -727,3 +727,5 @@ body{
 .fw-viewer-scroll{ overflow: auto; -webkit-overflow-scrolling: touch; max-height: 74vh; max-width: 86vw; }
 .fw-viewer-actions{ display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; }
 .fw-viewer-actions .fw-action{ font-size: 13px; padding: 8px 12px; }
+
+.fw-menu-version{ padding: 8px 16px 10px; font-size: 11px; color: var(--slate); border-top: 1px solid var(--line); }

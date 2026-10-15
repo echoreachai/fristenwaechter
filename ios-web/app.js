@@ -19,18 +19,40 @@ const APPLE_EULA_URL = "https://www.apple.com/legal/internet-services/itunes/dev
 const PRIVACY_URL = "https://echoreachai.github.io/fristenwaechter/datenschutz.html";
 const IMPRINT_URL = "https://echoreachai.github.io/fristenwaechter/impressum.html";
 
-const Store = (() => {
+// Stand der iOS-Webdateien — steht unten im Menü, damit man in TestFlight
+// sofort sieht, ob der neue Build läuft.
+const APP_WEB_VERSION = "2026-10-15";
+
+// In der iOS-App stellt die Capacitor-Bridge nur window.Capacitor.nativePromise
+// bereit. Capacitor.registerPlugin() gibt es dort NICHT — das kommt aus dem
+// npm-Paket @capacitor/core, das diese App (ohne Bundler) nicht einbindet.
+// Daher ein eigener kleiner Plugin-Zugriff über nativePromise.
+function isIosNativeApp() {
   try {
     const cap = window.Capacitor;
-    if (cap && typeof cap.isNativePlatform === "function" && cap.isNativePlatform() &&
-        typeof cap.getPlatform === "function" && cap.getPlatform() === "ios" &&
-        typeof cap.registerPlugin === "function") {
-      return cap.registerPlugin("NativePurchases");
-    }
-  } catch (err) { /* kein Capacitor -> Web/Android */ }
-  return null;
-})();
-const IS_IOS_APP = !!Store;
+    return !!(cap && typeof cap.isNativePlatform === "function" && cap.isNativePlatform() &&
+      typeof cap.getPlatform === "function" && cap.getPlatform() === "ios" &&
+      (typeof cap.nativePromise === "function" || typeof cap.registerPlugin === "function"));
+  } catch (err) {
+    return false;
+  }
+}
+const IS_IOS_APP = isIosNativeApp();
+function nativePlugin(name) {
+  const cap = window.Capacitor;
+  if (typeof cap.registerPlugin === "function") return cap.registerPlugin(name);
+  return new Proxy({}, {
+    get(_, method) {
+      if (method === "then" || typeof method !== "string") return undefined;
+      if (method === "addListener") {
+        return (eventName, callback) => Promise.resolve(
+          typeof cap.addListener === "function" ? cap.addListener(name, eventName, callback) : null);
+      }
+      return (options) => cap.nativePromise(name, method, options || {});
+    },
+  });
+}
+const Store = IS_IOS_APP ? nativePlugin("NativePurchases") : null;
 
 // Gating nur in der iOS-App, wo man auch kaufen kann.
 const PRO_GATING_ENABLED = IS_IOS_APP;
@@ -58,8 +80,8 @@ function isPro() {
    iOS-App wird die Datei deshalb im App-Cache gespeichert und über das
    iOS-Teilen-Menü angeboten (Sichern in „Dateien“, Drucken, Mail, AirDrop …).
    Im Browser/Android bleibt es beim normalen Download. */
-const NativeFs = IS_IOS_APP ? window.Capacitor.registerPlugin("Filesystem") : null;
-const NativeShare = IS_IOS_APP ? window.Capacitor.registerPlugin("Share") : null;
+const NativeFs = IS_IOS_APP ? nativePlugin("Filesystem") : null;
+const NativeShare = IS_IOS_APP ? nativePlugin("Share") : null;
 function blobToBase64(blob) {
   return new Promise((resolve, reject) => {
     const r = new FileReader();
@@ -1400,7 +1422,14 @@ function renderCard(entry) {
   const viewBtn = card.querySelector('[data-action="view"]');
   if (viewBtn) viewBtn.addEventListener("click", () => openViewer(entry.beleg));
   const letterBtn = card.querySelector('[data-action="letter"]');
-  if (letterBtn) letterBtn.addEventListener("click", () => generateLetterPdf(entry));
+  if (letterBtn) letterBtn.addEventListener("click", () => {
+    try {
+      generateLetterPdf(entry);
+    } catch (err) {
+      console.error("Schreiben fehlgeschlagen:", err);
+      window.alert("Das Schreiben konnte nicht erstellt werden.\n\n(" + String((err && err.message) || err).slice(0, 120) + ")");
+    }
+  });
   const compareBtn = card.querySelector('[data-action="compare"]');
   if (compareBtn) compareBtn.addEventListener("click", () => openComparePopup(entry));
   const copyIbanBtn = card.querySelector('[data-action="copy-iban"]');
@@ -2040,6 +2069,10 @@ function openViewer(beleg) {
   // prüfen. Der PDF-Viewer läuft zusätzlich in einem "sandbox"-iframe
   // ohne Skriptrechte.
   const isRealPdf = typeof beleg.dataUrl === "string" && beleg.dataUrl.startsWith("data:application/pdf");
+  if (isRealPdf && /^data:application\/pdf;filename=[^;]*;/.test(beleg.dataUrl)) {
+    beleg = Object.assign({}, beleg, { dataUrl: beleg.dataUrl.replace(/^data:application\/pdf;filename=[^;]*;/, "data:application/pdf;") });
+    currentBeleg = beleg;
+  }
   // Mehrseitige Fotobelege: jede Seite einzeln validieren, ungültige
   // Seiten werden übersprungen statt die ganze Ansicht zu blockieren.
   const pageList = Array.isArray(beleg.pages) && beleg.pages.length ? beleg.pages : [beleg.dataUrl];
@@ -2725,6 +2758,7 @@ $("#pro-manage").addEventListener("click", async () => {
 $("#pro-link-eula").addEventListener("click", () => openExternal(APPLE_EULA_URL));
 $("#pro-link-privacy").addEventListener("click", () => openExternal(PRIVACY_URL));
 
+$("#menu-version").textContent = `Version ${APP_WEB_VERSION}${IS_IOS_APP ? " · iOS" : ""}`;
 if (IS_IOS_APP) {
   const menuPro = $("#menu-pro");
   const menuLegal = $("#menu-legal");
@@ -2849,9 +2883,12 @@ function generateLetterPdf(entry) {
     doc.save(pdfName);
     return;
   }
+  showToast("📄 Schreiben wird erstellt …");
   deliverFile(doc.output("blob"), pdfName, isAbo ? "Kündigungsschreiben" : "Einspruchsschreiben").catch((err) => {
     console.warn("Schreiben konnte nicht geteilt werden:", err);
-    window.alert(fileErrorMessage(err));
+    // Notlösung: PDF wenigstens in der App anzeigen
+    openViewer({ name: pdfName, mime: "application/pdf", dataUrl: doc.output("datauristring") });
+    window.alert(fileErrorMessage(err) + "\n\n(" + String((err && err.message) || err).slice(0, 120) + ")");
   });
 }
 
