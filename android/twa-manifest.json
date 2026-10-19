@@ -1,0 +1,46 @@
+{
+  "packageId": "com.echoreach.fristenwaechter",
+  "host": "echoreachai.github.io",
+  "name": "Fristen-Wächter",
+  "launcherName": "Fristen-Wächter",
+  "display": "standalone",
+  "themeColor": "#1D2B3A",
+  "themeColorDark": "#1D2B3A",
+  "navigationColor": "#1D2B3A",
+  "navigationColorDark": "#1D2B3A",
+  "navigationDividerColor": "#1D2B3A",
+  "navigationDividerColorDark": "#1D2B3A",
+  "backgroundColor": "#EDE7DA",
+  "enableNotifications": true,
+  "startUrl": "/fristenwaechter/index.html",
+  "iconUrl": "https://echoreachai.github.io/fristenwaechter/icons/icon-512.png",
+  "maskableIconUrl": "https://echoreachai.github.io/fristenwaechter/icons/icon-maskable-512.png",
+  "splashScreenFadeOutDuration": 300,
+  "signingKey": {
+    "path": "./android.keystore",
+    "alias": "upload"
+  },
+  "appVersionCode": 10,
+  "shortcuts": [],
+  "generatorApp": "bubblewrap-cli",
+  "webManifestUrl": "https://echoreachai.github.io/fristenwaechter/manifest.json",
+  "fallbackType": "customtabs",
+  "features": {
+    "playBilling": {
+      "enabled": true
+    }
+  },
+  "alphaDependencies": {
+    "enabled": true
+  },
+  "enableSiteSettingsShortcut": true,
+  "isChromeOSOnly": false,
+  "isMetaQuest": false,
+  "fullScopeUrl": "https://echoreachai.github.io/fristenwaechter/",
+  "minSdkVersion": 21,
+  "orientation": "portrait",
+  "fingerprints": [],
+  "additionalTrustedOrigins": [],
+  "retainedBundles": [],
+  "displayOverride": []
+}

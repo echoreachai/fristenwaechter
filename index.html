@@ -29,7 +29,10 @@
           <button class="fw-menu-item" id="menu-import">📥 Backup importieren</button>
           <button class="fw-menu-item" id="menu-sender">👤 Absenderdaten</button>
           <button class="fw-menu-item" id="menu-garantie">🛡️ Garantie-Archiv</button>
+          <button class="fw-menu-item" id="menu-pro" style="display:none">⭐ Fristen-Wächter Pro</button>
           <button class="fw-menu-item" id="menu-feedback">💬 Feedback senden</button>
+          <button class="fw-menu-item" id="menu-legal" style="display:none">📄 Datenschutz &amp; Impressum</button>
+          <div class="fw-menu-version" id="menu-version"></div>
         </div>
       </div>
     </div>
@@ -54,6 +57,10 @@
       <button class="fw-stat fw-stat-clickable" id="stat-garantie-btn" type="button">
         <div class="fw-stat-num" id="stat-garantie">0</div>
         <div class="fw-stat-label">🛡️ Garantien</div>
+      </button>
+      <button class="fw-stat fw-stat-clickable fw-stat-savings" id="stat-savings-btn" type="button">
+        <div class="fw-stat-num" id="stat-savings">0 €</div>
+        <div class="fw-stat-label" id="stat-savings-label">💶 Gespart</div>
       </button>
     </div>
   </header>
@@ -139,6 +146,18 @@
           <label class="fw-label" for="input-abo">Kündigungsfrist / Stichtag</label>
           <input type="date" class="fw-input" id="input-abo" />
           <p class="fw-hint">Trage den letzten Tag ein, an dem du kündigen kannst — laut deinem Vertrag.</p>
+          <label class="fw-label" for="input-intervall" style="margin-top:12px">Zahlungsintervall</label>
+          <select class="fw-input" id="input-intervall">
+            <option value="monatlich">Monatlich</option>
+            <option value="jaehrlich">Jährlich</option>
+            <option value="einmalig">Einmalig</option>
+          </select>
+          <p class="fw-hint">Wird für die Ersparnis-Auswertung genutzt — der Betrag oben gilt pro Intervall.</p>
+          <label class="fw-check-row" id="serie-row">
+            <input type="checkbox" id="input-serie" />
+            <span>🔁 Als Serie fortsetzen <span class="fw-pro-badge">PRO</span></span>
+          </label>
+          <p class="fw-hint">Wenn du bis zur Frist nicht kündigst, springt die Frist automatisch ein Intervall weiter — der Zähler startet neu.</p>
         </div>
 
         <div class="fw-field" id="field-strafzettel" style="display:none">
@@ -213,8 +232,12 @@
   <!-- Beleg-Viewer -->
   <div class="fw-viewer-overlay" id="fw-viewer-overlay" style="display:none">
     <div class="fw-viewer-box">
-      <button class="fw-viewer-close" id="fw-viewer-close">✕</button>
+      <button class="fw-viewer-close" id="fw-viewer-close" aria-label="Schließen">✕</button>
       <div id="fw-viewer-content"></div>
+      <div class="fw-viewer-actions">
+        <span class="fw-hint" id="fw-viewer-hint"></span>
+        <button type="button" class="fw-action" id="fw-viewer-share" style="display:none">📤 Teilen / Öffnen</button>
+      </div>
     </div>
   </div>
 
@@ -311,6 +334,62 @@
       <div class="fw-modal-actions">
         <button type="button" class="fw-btn-secondary" id="compare-close" style="flex:1">Schließen</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Pro-Freischaltung (Paywall) -->
+  <div class="fw-overlay" id="pro-overlay" style="display:none">
+    <div class="fw-modal">
+      <h2 class="fw-modal-title">Fristen-Wächter <span class="fw-pro-badge">PRO</span></h2>
+      <p class="fw-modal-sub" id="pro-reason"></p>
+
+      <div id="pro-offer">
+        <ul class="fw-pro-list">
+          <li><strong>Unbegrenzte Einträge</strong> — statt 10 offener Einträge in der Gratis-Version</li>
+          <li><strong>Ersparnis-Auswertung</strong> — direkt im Dashboard sehen, wie viel du dieses Jahr durch rechtzeitige Kündigungen gespart hast</li>
+          <li><strong>Abo-Serien</strong> — laufende Abos setzen ihre Frist automatisch jedes Intervall neu</li>
+        </ul>
+        <div class="fw-plan-options">
+          <button type="button" class="fw-plan is-selected" data-plan="yearly">
+            <span class="fw-plan-name">Jahresabo</span>
+            <span class="fw-plan-price" id="price-yearly">9,99 € / Jahr</span>
+            <span class="fw-plan-note" id="note-yearly">16 % günstiger als monatlich</span>
+          </button>
+          <button type="button" class="fw-plan" data-plan="monthly">
+            <span class="fw-plan-name">Monatsabo</span>
+            <span class="fw-plan-price" id="price-monthly">0,99 € / Monat</span>
+            <span class="fw-plan-note">monatlich kündbar</span>
+          </button>
+        </div>
+        <div class="fw-modal-actions">
+          <button type="button" class="fw-btn-secondary" id="pro-close">Später</button>
+          <button type="button" class="fw-btn-primary" id="pro-buy">Pro freischalten</button>
+        </div>
+        <button type="button" class="fw-link-btn" id="pro-restore">Käufe wiederherstellen</button>
+        <p class="fw-pro-terms">
+          Abo mit automatischer Verlängerung. Die Zahlung wird bei Bestätigung des Kaufs
+          über deine Apple-ID abgerechnet. Das Abo verlängert sich automatisch um den
+          gewählten Zeitraum zum angezeigten Preis, wenn es nicht mindestens 24 Stunden
+          vor Ablauf des aktuellen Zeitraums gekündigt wird. Kündigen und verwalten kannst
+          du das Abo jederzeit in den Einstellungen deiner Apple-ID.
+        </p>
+      </div>
+
+      <div id="pro-active" style="display:none">
+        <p class="fw-pro-active">✓ Pro ist aktiv — danke für deine Unterstützung!</p>
+        <p class="fw-hint" id="pro-active-until"></p>
+        <div class="fw-modal-actions">
+          <button type="button" class="fw-btn-secondary" id="pro-close-active">Schließen</button>
+          <button type="button" class="fw-btn-primary" id="pro-manage">Abo verwalten</button>
+        </div>
+      </div>
+
+      <p class="fw-hint fw-pro-status" id="pro-status" style="display:none" role="status" aria-live="polite"></p>
+      <p class="fw-pro-legal">
+        <button type="button" class="fw-link-btn" id="pro-link-eula">Nutzungsbedingungen (EULA)</button>
+        ·
+        <button type="button" class="fw-link-btn" id="pro-link-privacy">Datenschutz</button>
+      </p>
     </div>
   </div>
 

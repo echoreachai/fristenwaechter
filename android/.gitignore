@@ -1,0 +1,9 @@
+# Niemals Schlüssel oder Build-Ergebnisse ins Repo
+*.keystore
+*.jks
+*.aab
+*.apk
+local.properties
+.gradle/
+build/
+app/build/

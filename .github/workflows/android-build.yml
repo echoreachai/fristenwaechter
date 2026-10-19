@@ -1,0 +1,103 @@
+# Baut die Android-App (Trusted Web Activity mit Google Play Billing) als
+# signiertes App-Bundle (.aab) für die Play Console.
+#
+# Start: GitHub -> Actions -> "Android-App bauen (AAB)" -> "Run workflow".
+# Ergebnis: unter dem Lauf bei "Artifacts" -> fristen-waechter-aab herunterladen.
+#
+# Benötigte Repository-Secrets (Settings -> Secrets and variables -> Actions):
+#   ANDROID_KEYSTORE_BASE64   dein Upload-Keystore als Base64-Text
+#   ANDROID_KEYSTORE_PASSWORD Passwort des Keystores
+#   ANDROID_KEY_ALIAS         Alias des Schlüssels (bei PWABuilder meist "my-key-alias")
+#   ANDROID_KEY_PASSWORD      Passwort des Schlüssels
+name: Android-App bauen (AAB)
+
+on:
+  workflow_dispatch:
+    inputs:
+      versionCode:
+        description: "versionCode – muss höher sein als die letzte Version in der Play Console"
+        required: true
+        default: "2.3"
+      versionName:
+        description: "FristenWächter"
+        required: true
+        default: "1.1.0"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - name: Code holen
+        uses: actions/checkout@v4
+
+      - name: Secrets prüfen
+        env:
+          KS: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KSP: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KA: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KP: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          missing=""
+          [ -z "$KS" ] && missing="$missing ANDROID_KEYSTORE_BASE64"
+          [ -z "$KSP" ] && missing="$missing ANDROID_KEYSTORE_PASSWORD"
+          [ -z "$KA" ] && missing="$missing ANDROID_KEY_ALIAS"
+          [ -z "$KP" ] && missing="$missing ANDROID_KEY_PASSWORD"
+          if [ -n "$missing" ]; then
+            echo "::error::Fehlende Repository-Secrets:$missing"
+            exit 1
+          fi
+          case "${{ inputs.versionCode }}" in
+            ''|*[!0-9]*) echo "::error::versionCode muss eine ganze Zahl sein"; exit 1 ;;
+          esac
+
+      - name: Java 17 einrichten
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Android SDK einrichten
+        uses: android-actions/setup-android@v3
+
+      - name: Keystore bereitstellen
+        env:
+          KS: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          echo "$KS" | base64 -d > "$RUNNER_TEMP/upload.keystore"
+          test -s "$RUNNER_TEMP/upload.keystore" || { echo "::error::Keystore ist leer – Base64 prüfen"; exit 1; }
+
+      - name: App-Bundle bauen und signieren
+        env:
+          FW_KEYSTORE_PATH: ${{ runner.temp }}/upload.keystore
+          FW_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          FW_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          FW_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon bundleRelease \
+            -PversionCode="${{ inputs.versionCode }}" \
+            -PversionName="${{ inputs.versionName }}"
+
+      - name: Signatur und Billing-Berechtigung prüfen
+        run: |
+          AAB=app/build/outputs/bundle/release/app-release.aab
+          test -f "$AAB"
+          keytool -printcert -jarfile "$AAB" | sed -n '1,12p'
+          unzip -p "$AAB" base/manifest/AndroidManifest.xml | strings | grep -q "com.android.vending.BILLING" \
+            && echo "OK: com.android.vending.BILLING ist im Bundle" \
+            || { echo "::error::BILLING-Berechtigung fehlt im Bundle"; exit 1; }
+
+      - name: Keystore löschen
+        if: always()
+        run: rm -f "$RUNNER_TEMP/upload.keystore"
+
+      - name: AAB hochladen
+        uses: actions/upload-artifact@v4
+        with:
+          name: fristen-waechter-aab
+          path: android/app/build/outputs/bundle/release/app-release.aab
+          retention-days: 14
