@@ -17,9 +17,9 @@ on:
       versionCode:
         description: "versionCode – muss höher sein als die letzte Version in der Play Console"
         required: true
-        default: "2.3"
+        default: "10"
       versionName:
-        description: "FristenWächter"
+        description: "Versionsname (wird im Play Store angezeigt)"
         required: true
         default: "1.1.0"
 
@@ -62,6 +62,11 @@ jobs:
 
       - name: Android SDK einrichten
         uses: android-actions/setup-android@v3
+        with:
+          # Standard wäre "tools platform-tools" – das Paket "tools" gibt es in
+          # neuen SDK-Versionen nicht mehr (Fehler: Failed to find package 'tools').
+          packages: "platform-tools platforms;android-36 build-tools;35.0.0"
+          log-accepted-android-sdk-licenses: false
 
       - name: Keystore bereitstellen
         env:
