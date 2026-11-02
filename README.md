@@ -4,281 +4,61 @@ Eine installierbare Web-App zum Verfolgen von Widerrufs- und Kündigungsfristen.
 Alle Daten (inkl. Fotos/PDFs) bleiben **nur auf deinem Gerät** (localStorage) —
 es gibt keinen Server, der Daten sammelt.
 
+## Kurzbeschreibung 
+Retouren, Abos, Strafzettel & Rechnungen – nie wieder eine Frist verpassen.
 
-## Erinnerungen / Benachrichtigungen
+## Vollständige Beschreibung 
 
-Beim ersten Öffnen fragt die App nach der Berechtigung für Benachrichtigungen.
-Sobald aktiviert, bekommst du eine Benachrichtigung, wenn eine Frist in ≤ 3
-Tagen abläuft oder bereits überfällig ist — jedes Mal, wenn du die App öffnest
-oder sie im Hintergrund-Tab aktiv ist.
+Fristen-Wächter behält für dich im Blick, was sonst im E-Mail-Postfach oder
+im Papierstapel untergeht: Widerrufsfristen bei Online-Bestellungen,
+Kündigungsfristen bei Abos, Einspruchsfristen bei Strafzetteln und
+Fälligkeitstermine bei offenen Rechnungen.
 
-**Wichtige Einschränkung:** Echte Push-Benachrichtigungen bei einer
-komplett geschlossenen App erfordern einen Server (Web Push API) — das ist
-hier bewusst nicht eingebaut, damit keine Daten irgendwo hochgeladen werden.
-Auf manchen Android-Chrome-Versionen versucht die App zusätzlich, eine
-"Periodic Background Sync" zu registrieren (prüft still im Hintergrund,
-ca. alle 12 Stunden) — das ist aber herstellerabhängig und nicht garantiert.
-Am zuverlässigsten: Öffne die App kurz, wenn du an dringende Fristen erinnert
-werden willst.
+WAS DIE APP KANN
 
-## Zahlungsdaten bei "Offene Rechnung" (IBAN, Zahlungsempfänger, Referenz)
+• Automatische Fristberechnung: Bei Retouren berechnet die App die
+14-tägige Widerrufsfrist automatisch – inklusive gesetzlicher Feiertage.
 
-Bei Einträgen vom Typ **Offene Rechnung** gibt es zusätzliche Felder für
-Zahlungsempfänger, IBAN und eine Rechnungs-/Verwendungszweck-Nummer — alle
-werden beim Foto-/PDF-Scan automatisch mit ausgefüllt, wenn im Beleg
-erkennbar:
+• Vier Kategorien: Widerruf/Retoure, Abo-Kündigung, Strafzettel, Offene
+Rechnung – jede mit den passenden Feldern.
 
-- **IBAN**: wird per Prüfsummen-Berechnung (ISO-7064-Verfahren) erkannt und
-  validiert, damit nicht irgendeine Zahlenfolge im Text fälschlich als IBAN
-  übernommen wird. Auf der Karte gibt es einen "IBAN kopieren"-Button für
-  die Überweisung.
-- **Zahlungsempfänger**: wird anhand von Begriffen wie "Zahlungsempfänger",
-  "Kontoinhaber" oder "Begünstigter" gesucht; ohne expliziten Treffer wird
-  ersatzweise der erkannte Anbieter-Name übernommen (in den meisten Fällen
-  ist der Rechnungssteller auch der Kontoinhaber).
-- **Referenznummer**: je nach Kategorie wird nach Rechnungsnummer,
-  Kundennummer, Aktenzeichen o. ä. gesucht — die Schlüsselwörter
-  unterscheiden sich zwischen Rechnung, Abo und Strafzettel.
+• Beleg-Scan mit Texterkennung: Foto oder PDF hochladen, die App liest
+Datum, Betrag, Anbieter, Referenznummer, IBAN und Zahlungsempfänger
+automatisch aus und trägt sie ins Formular ein.
 
-Auch die **Betrags-Erkennung** wurde verbessert: Sie bevorzugt jetzt
-eindeutig die Gesamtsumme ("Gesamtbetrag", "Endbetrag") und überspringt
-bewusst Zwischensummen wie "Nettobetrag", damit nicht versehentlich der
-Betrag vor Mehrwertsteuer übernommen wird.
+• Fertige Schreiben als PDF: Für Abo-Kündigungen und Einsprüche gegen
+Strafzettel erstellt die App auf Knopfdruck eine formatierte,
+versandfertige Brief-Vorlage zum Download.
 
-## Verbesserte Erkennung (Anbieter, Zahlungsempfänger, Betrag)
+• Backup & Wiederherstellung: Alle Einträge inklusive Fotos lassen sich
+als Datei exportieren – optional passwortverschlüsselt – und auf einem
+anderen Gerät wiederherstellen.
 
-- **Anbieter/Zahlungsempfänger**: Die App bewertet jetzt Textzeilen im Beleg
-  nach Position und Schriftgröße statt einfach nur die erste Zeile zu
-  nehmen — Firmennamen im Briefkopf stehen meist oben rechts oder in
-  größerer Schrift, genau das wird jetzt bevorzugt erkannt. Bei
-  "Zahlungsempfänger" wird zuerst nach einem expliziten Stichwort gesucht
-  ("Zahlungsempfänger", "Kontoinhaber" …), dann dasselbe Verfahren wie beim
-  Anbieter angewandt, als letzte Rückfallebene das bereits erkannte
-  Anbieter-Feld.
-- **Betrag-Priorität**: Erkennt zuerst "Gesamtbetrag"/"Gesamtsumme", dann
-  "Überweisungsbetrag"/"zu zahlen(der Betrag)", erst danach die bisherigen,
-  allgemeineren Stichwörter.
+• Übersichtliches Dashboard: Auf einen Blick siehst du, welche Fristen
+dringend sind, welche bald anstehen und welche du bereits erledigt hast.
 
-## Deutlicherer Scan-Hinweis
+DEINE DATEN BLEIBEN AUF DEINEM GERÄT
 
-Während ein Foto/PDF gelesen wird, zeigt die App jetzt einen auffälligen
-Hinweis mit Lade-Spinner (statt eines kleinen grauen Texthinweises) —
-leichter zu erkennen, dass die Erkennung noch läuft.
+Fristen-Wächter speichert alles ausschließlich lokal auf deinem Handy.
+Es gibt keinen Server, keine Cloud, kein Nutzerkonto und keine Werbung.
+Auch die Texterkennung läuft komplett auf deinem Gerät – deine Fotos und
+Dokumente verlassen dein Handy nicht.
 
-## Garantie-Archiv
+FÜR WEN
 
-Eigener Bereich für Kaufbelege und Garantiefristen — bewusst getrennt von
-den übrigen Fristen, da seltener gebraucht. Erreichbar über das Menü (⋮)
-→ "🛡️ Garantie-Archiv" oder direkt über die Kachel "🛡️ Garantien" im
-Dashboard (die Zahl zeigt aktive Garantien und färbt sich gelb, sobald
-eine davon bald abläuft).
+Für alle, die online bestellen, Abos abgeschlossen haben oder einfach den
+Überblick über Fristen und offene Zahlungen behalten wollen, ohne dafür
+das E-Mail-Postfach zu durchsuchen.
 
-- Neue Garantie: Kaufdatum + Garantiedauer in Jahren (Standard: 2) — das
-  Garantie-Ende wird automatisch berechnet (Schaltjahre korrekt).
-- Beim Scan eines Kassenbons/Kaufbelegs sucht die Texterkennung gezielt
-  nach Kaufdatum/Bondatum, dazu Händler und Betrag wie gewohnt.
-- Garantien erscheinen nicht in der normalen Fristen-Liste und zählen
-  nicht in Dringend/Bald/Aktiv/Gesamt mit.
-- Lange Laufzeiten zeigt der Stempel in Monaten statt Tagen an.
-- Wird bei Backup-Export/-Import vollständig mitgesichert.
+Feedback und Ideen? Direkt in der App über das Menü → "Feedback senden".
 
-## Mehrseitige Belege scannen
-
-Nach dem ersten Foto erscheint ein Button **"+ Weitere Seite
-hinzufügen"** (nur bei Fotos, nicht bei PDF — ein PDF kann ja bereits von
-sich aus mehrseitig sein). Jede hinzugefügte Seite erscheint als
-Miniaturansicht mit Seitenzahl und einem "×"-Button zum Entfernen.
-Maximal 10 Seiten pro Beleg.
-
-Die Texterkennung läuft über alle Seiten hinweg zusammen: Findet Seite 1
-z. B. den Anbieter und das Datum, aber Seite 2 erst den Gesamtbetrag,
-werden beide Treffer übernommen — ein bereits gefundener Wert wird durch
-eine spätere Seite nicht mehr überschrieben, nur noch offene Felder
-werden weiter befüllt. Beim Ansehen des gespeicherten Belegs
-("Beleg ansehen") werden alle Seiten untereinander zum Scrollen
-angezeigt.
-
-## Texterkennung (OCR) beim Foto-Upload
-
-Beim Hochladen eines Fotos (Lieferschein, Bescheid, Rechnung) liest die App
-automatisch Datum, Betrag und einen Anbieter-Vorschlag aus dem Bild und
-trägt sie ins Formular ein. Das läuft komplett im Browser (Tesseract.js),
-es wird kein Foto irgendwohin hochgeladen.
-
-Bei **PDF-Belegen** wird zuerst versucht, die eingebettete Textebene direkt
-auszulesen (schnell, exakt, funktioniert bei den meisten digital erzeugten
-Rechnungen/Bescheiden). Enthält das PDF keine Textebene — etwa weil es ein
-eingescanntes Dokument ist — rendert die App automatisch die erste Seite
-als Bild und liest sie stattdessen per OCR, genau wie bei einem Foto.
-
-Die Datumserkennung ist dabei **kategorie-abhängig**: Bei einer Retoure wird
-das Erhalten-/Lieferdatum gesucht, bei Abo/Strafzettel/Rechnung dagegen
-gezielt nach Frist- bzw. Fälligkeitsangaben ("Zahlbar bis", "Zahlungsziel",
-"Kündigungsfrist" usw.) — nicht das allgemeine Briefkopf-Datum, das bei
-Rechnungen meist weiter oben steht als die eigentliche Zahlungsfrist.
-
-Einschränkungen im Standard-Umfang:
-
-- Die Erkennung ist ein **Vorschlag**, keine Garantie — bitte vor dem
-  Speichern kurz prüfen, besonders bei unscharfen Fotos oder ungewöhnlichen
-  Belegformaten.
-- Beim **ersten** Einsatz auf einem Gerät lädt der Browser einmalig die
-  benötigten Bibliotheken/Sprachdaten (paar MB) von einem CDN nach — dafür
-  ist kurz Internet nötig. Danach funktioniert die Erkennung auch offline.
-- Bereits von Hand ausgefüllte Felder werden nicht überschrieben.
-
-
-Die App wurde auf typische Web-Schwachstellen geprüft. Behoben:
-
-- **pdf.js CVE-2024-4367** (Ausführung von beliebigem JavaScript über ein
-  präpariertes PDF): Bibliothek von v3.11.174 auf v4.9.155 aktualisiert
-  (dabei technisch auf ES-Module umgestellt, da neuere pdf.js-Versionen
-  keinen klassischen `<script>`-Import mehr unterstützen).
-- **Gespeichertes XSS über Backup-Import**: Ein unbekannter/manipulierter
-  `entry.type` wurde früher roh ins HTML eingesetzt. Wird jetzt immer über
-  eine feste Whitelist aufgelöst; importierte Einträge werden zusätzlich
-  komplett auf ein festes, geprüftes Feld-Schema zurechtgestutzt.
-- **PDF-Beleg-Viewer**: `iframe` läuft jetzt mit `sandbox`-Attribut (keine
-  Skriptausführung), und es wird der tatsächliche Inhalt der Datei geprüft
-  statt nur einem mitgeführten `mime`-Feld zu vertrauen.
-- **Externe Bibliotheken**: jsPDF und Tesseract.js werden jetzt mit
-  Subresource-Integrity-Prüfung (`integrity`-Attribut) geladen, sodass ein
-  kompromittiertes CDN nicht unbemerkt anderen Code ausliefern könnte.
-- **`window.open`**-Aufrufe nutzen jetzt zusätzlich zu `noopener` auch
-  `noreferrer`.
-- **Backup-Verschlüsselung**: PBKDF2-Runden von 200.000 auf 600.000 erhöht
-  (aktuelle OWASP-Empfehlung für PBKDF2-HMAC-SHA256). Bestehende Backups
-  bleiben entschlüsselbar, da jede Datei ihre eigene Rundenzahl mitführt.
-
-## Alternativen vergleichen (bei Abo-Kündigungen)
-
-Bei Abo-Einträgen gibt es einen Button **"Alternativen vergleichen"**, der
-nur bei Klick aktiv wird (keine automatische Hintergrund-Abfrage). Er öffnet
-ein Popup mit anklickbaren Optionen:
-
-- der **offiziellen Anbieter-Seite**, falls die App den Dienst erkennt
-  (u. a. Netflix, Disney+, Amazon Prime Video, Spotify, DAZN, WOW, Apple
-  TV+, YouTube Premium, Audible, Paramount+, MagentaTV, Joyn, sowie die
-  Mobilfunk-Anbieter Vodafone, Telekom, o2, 1&1, congstar),
-- den unabhängigen Vergleichsportalen **Verivox** und **Check24** — aber
-  nur, wenn die Kategorie des Eintrags dazu passt (aktuell: Streaming und
-  Mobilfunk, mit jeweils verifizierten Sparten-Links). Bei anderen
-  Abo-Arten (z. B. Fitnessstudio, Versicherung, Zeitschrift) werden diese
-  beiden Buttons bewusst **nicht** angezeigt, statt einen unpassenden
-  Vergleichslink zu zeigen,
-- einer Google-Suche nach günstigeren Alternativen (Suchbegriff ist der
-  Eintragstitel) — funktioniert für jede Kategorie.
-
-Ein Klick auf eine Option öffnet die jeweilige Seite direkt in einem neuen
-Tab, die App bleibt dabei im Hintergrund offen. Bewusst **keine festen
-Preisangaben**: Da die App keinen Server und keine Live-Recherche zur
-Laufzeit hat, würden eingebaute Preise mit der Zeit veraltet und
-potenziell falsch sein. Links dagegen bleiben aktuell, weil sie direkt auf
-die Quelle verweisen. Es handelt sich um reine Verlinkung, keine
-Affiliate-/Provisions-Links.
-
-## Kündigungs- und Einspruchsschreiben (PDF)
-
-Bei Einträgen vom Typ **Abo-Kündigung** und **Strafzettel** gibt es auf der
-Karte einen zusätzlichen Button ("Kündigung erstellen" bzw. "Einspruch
-erstellen"), der eine fertig formatierte Brief-Vorlage als PDF erzeugt und
-zum Download anbietet. Läuft komplett im Browser (jsPDF), es wird nichts
-hochgeladen.
-
-Damit das funktioniert:
-
-- **Absenderdaten** einmalig hinterlegen: Menü (⋮) → "Absenderdaten" → Name,
-  Straße, PLZ/Ort. Werden nur lokal gespeichert und für jeden Brief
-  wiederverwendet.
-- Beim Anlegen eines Abo- oder Strafzettel-Eintrags können optional
-  **Kundennummer/Aktenzeichen** und die **Anbieter-/Behördenadresse**
-  angegeben werden — beides landet dann automatisch im Schreiben. Ohne
-  Adresse bleibt im PDF ein Platzhalter zum manuellen Ergänzen stehen.
-
-Wichtig: Das erzeugte PDF ist eine **Vorlage**, kein geprüftes
-Rechtsdokument — bitte vor dem Versand durchlesen, und bei einem
-Einspruch ggf. noch eine eigene Begründung ergänzen (die App kennt die
-Details deines Falls nicht und ist keine Rechtsberatung).
-
-## Feedback senden
-
-Über das Menü (⋮) → "Feedback senden" öffnet sich ein Textfeld. Beim
-Klick auf "In Mail-App öffnen" wird die Standard-Mail-App des Handys mit
-einer vorausgefüllten Nachricht an `echoreachai@gmail.com` geöffnet — dort
-noch einmal auf Senden tippen, dann ist es raus.
-
-Technischer Hinweis: Eine Web-App ohne eigenen Server kann E-Mails nicht
-selbst und lautlos verschicken (dafür bräuchte es SMTP-Zugriff, den Browser
-nicht haben). Der `mailto:`-Link ist der Standardweg dafür — er erfordert
-einen zusätzlichen Tap in der Mail-App, dafür aber kein extra Konto und
-keinen zusätzlichen Server.
-
-## Backup & Wiederherstellung
-
-Über das Menü (⋮ oben rechts im Header) lässt sich jederzeit ein
-vollständiges Backup aller Einträge (inkl. hinterlegter Fotos/PDFs) als
-Datei exportieren und auf einem anderen Gerät wieder importieren.
-
-- **Exportieren**: erzeugt eine `.json`-Datei zum Herunterladen. Optional
-  lässt sie sich mit einem selbst gewählten Passwort verschlüsseln
-  (AES-256-GCM, Schlüssel wird lokal per PBKDF2 aus dem Passwort abgeleitet
-  — das Passwort verlässt nie das Gerät und wird nirgends gespeichert).
-  **Wichtig:** Das Passwort gibt es nur einmal — ohne Passwort lässt sich
-  ein verschlüsseltes Backup nicht wiederherstellen.
-- **Importieren**: Backup-Datei auswählen, bei verschlüsselten Backups das
-  Passwort eingeben, dann entweder zu den vorhandenen lokalen Einträgen
-  **hinzufügen** (Duplikate anhand der internen ID werden übersprungen)
-  oder alle lokalen Einträge damit **ersetzen**.
-- Die Verschlüsselung nutzt die Web-Crypto-API des Browsers und benötigt
-  daher eine sichere Verbindung — funktioniert automatisch, sobald die App
-  über HTTPS läuft (z. B. via GitHub Pages).
-
-## Menü-Symbole (Android-Kompatibilität)
-
-Die Symbole für "Backup exportieren"/"Backup importieren" im Menü nutzten
-zwei seltene Pfeil-Sonderzeichen, die auf Android-Systemschriften oft
-nicht dargestellt werden (leeres Kästchen), auf dem Desktop-Browser aber
-schon (breitere Symbol-Schriftarten-Unterstützung). Auf die Standard-Emoji
-📤/📥 umgestellt, die auf allen Plattformen zuverlässig dargestellt
-werden — dieselben, die auch sonst im Menü verwendet werden.
-
-## Suche & Sortierung
-
-Unter den Filter-Reitern (Aktiv/Erledigt/Alle) gibt es jetzt ein Suchfeld
-(durchsucht Titel, Notiz und Referenznummer) sowie eine Sortierauswahl:
-Frist bald/spät zuerst, zuletzt hinzugefügt, oder alphabetisch. Hilfreich,
-um bei vielen älteren Einträgen schnell etwas wiederzufinden — z. B. wenn
-nicht mehr sicher ist, ob ein bestimmter Eintrag schon erledigt wurde.
-
-## Kategorie "Sonstiges"
-
-Fünfte Kategorie für alles, was in keine der anderen vier passt — mit
-einem einfachen Frist-/Stichtag-Feld und optionaler Referenznummer.
-Bekommt (anders als Abo/Strafzettel) keinen Kündigungs-/Einspruchsbrief
-und keinen Alternativen-Vergleich, da diese Funktionen kategoriespezifisch
-sind.
-
-## Kategorien
-
-- **Widerruf / Retoure** — Erhalten-Datum eintragen, 14-Tage-Frist wird automatisch berechnet.
-- **Abo-Kündigung** — Kündigungsstichtag direkt eintragen.
-- **Strafzettel** — Zahlungs-/Einspruchsfrist vom Bescheid eintragen.
-- **Offene Rechnung** — Fälligkeitsdatum eintragen.
-
-Bei allen vier Kategorien kann optional ein Betrag in € hinterlegt werden
-(z. B. Rückerstattung, Bußgeld oder Rechnungssumme) — er erscheint dann
-zusätzlich in der Übersicht.
-
-## Rechtlicher Hinweis zur Fristberechnung
-
-Die 14-Tage-Widerrufsfrist wird ab dem eingetragenen Erhalt-Datum berechnet
-und nach § 193 BGB auf den nächsten Werktag verschoben, falls das
-rechnerische Ende auf ein Wochenende oder einen bundesweiten bzw.
-NRW-Feiertag fällt. Das ist eine Orientierungshilfe für den Alltag,
-keine Rechtsberatung — bei wichtigen/hochpreisigen Retouren im Zweifel
-die Frist selbst gegenprüfen (z. B. bei abweichenden Vertragsklauseln
-oder Sonderfällen wie digitalen Inhalten).
-
+"Es werden keine Nutzerdaten erhoben oder weitergegeben" (No data
+collected / No data shared) – da alle Daten ausschließlich lokal auf dem
+Gerät gespeichert werden. Ausnahme ggf. korrekt angeben: Der Browser lädt
+beim Start technische JS-Bibliotheken von CDN-Anbietern (jsDelivr,
+cdnjs, Google Fonts) nach – dabei werden keine App- oder Nutzerdaten
+übertragen, nur die IP-Adresse ist technisch bedingt sichtbar (wie bei
+jedem Laden einer Web-Ressource).
 ## Dateien
 
 - `index.html` — App-Grundgerüst
