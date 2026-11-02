@@ -4,54 +4,6 @@ Eine installierbare Web-App zum Verfolgen von Widerrufs- und Kündigungsfristen.
 Alle Daten (inkl. Fotos/PDFs) bleiben **nur auf deinem Gerät** (localStorage) —
 es gibt keinen Server, der Daten sammelt.
 
-## Änderungen werden nicht sichtbar? (Service-Worker-Cache)
-
-Die App merkt sich Dateien für die Offline-Nutzung. Ab dieser Version lädt
-sie ihre eigenen Dateien **netzwerk-zuerst** nach, das heißt: Sobald du
-eine neue Version ins Repo hochlädst und dein Handy online ist, sollte die
-App beim nächsten Öffnen automatisch aktuell sein.
-
-Falls trotzdem noch der alte Stand angezeigt wird (z. B. weil eine ältere
-Version der App bei dir installiert war, die noch die alte Cache-first-
-Strategie genutzt hat), einmalig:
-
-1. App schließen (aus den zuletzt geöffneten Apps entfernen, nicht nur
-   minimieren).
-2. In Chrome: **Drei-Punkte-Menü → Einstellungen → Datenschutz und
-   Sicherheit → Browserdaten löschen** → nur "Bilder und Dateien im Cache"
-   für den Zeitraum "Letzte Stunde" (oder gezielt die Website-Daten für
-   deine GitHub-Pages-Domain löschen, falls Chrome das anbietet).
-3. App erneut öffnen (ggf. neu installieren).
-
-Danach greift wieder die neue, netzwerk-zuerst-Strategie und Updates
-kommen zuverlässig an.
-
-## Warum hosten?
-
-Damit Android Chrome die App als "echte" App anbietet (Icon auf dem
-Homescreen, Vollbild, Offline-Nutzung), muss sie über **HTTPS** ausgeliefert
-werden. Einfaches Doppelklicken der `index.html` reicht dafür nicht aus.
-Der schnellste kostenlose Weg ist GitHub Pages.
-
-## In 5 Minuten live schalten (GitHub Pages)
-
-1. Erstelle ein neues, öffentliches GitHub-Repository (z. B. `fristen-waechter`).
-2. Lade alle Dateien aus diesem Ordner in das Repository hoch (per Web-Oberfläche
-   "Add file → Upload files", oder per Git).
-3. Gehe zu **Settings → Pages**.
-4. Bei "Source" wähle den `main`-Branch und den Ordner `/ (root)`. Speichern.
-5. Nach ca. 1 Minute ist die App unter `https://DEIN-NUTZERNAME.github.io/fristen-waechter/` erreichbar.
-
-Alternativen mit demselben Ergebnis: Netlify oder Vercel (Ordner per Drag &
-Drop hochladen, fertig).
-
-## Auf dem Android-Handy installieren
-
-1. Öffne den Link (siehe oben) in **Chrome** auf deinem Handy.
-2. Tippe oben rechts auf das Drei-Punkte-Menü.
-3. Wähle **"App installieren"** bzw. **"Zum Startbildschirm hinzufügen"**.
-4. Die App erscheint danach wie jede andere App auf deinem Homescreen —
-   mit eigenem Icon, ohne Browser-Leiste.
 
 ## Erinnerungen / Benachrichtigungen
 
@@ -175,49 +127,6 @@ Einschränkungen im Standard-Umfang:
   ist kurz Internet nötig. Danach funktioniert die Erkennung auch offline.
 - Bereits von Hand ausgefüllte Felder werden nicht überschrieben.
 
-## Pro-Features (Vorbereitung)
-
-Es gibt aktuell keine bezahlten Funktionen — die App ist komplett frei
-nutzbar. Für den späteren Ausbau existiert bereits eine zentrale Stelle
-im Code: `isPro()` ganz oben in `app.js`, die derzeit immer `false`
-zurückgibt. Beim Einbau von Google Play Billing (Digital Goods API) wird
-nur diese eine Funktion ausgetauscht — Feature-Gating an beliebiger
-Stelle dann einfach über `if (!isPro()) { ... }`.
-
-## Sicherheit
-
-**Erneuter Scan nach Wiederherstellung des Stands vom 14.09.:** Alle
-vorherigen Fixes (gepatchtes pdf.js, SRI-Prüfung, PDF-Viewer-Sandbox,
-Typ-Whitelist gegen XSS beim Backup-Import, 600.000 PBKDF2-Runden,
-`noopener/noreferrer`) sind intakt. Neu ergänzt:
-
-- **Bild-Signatur-Prüfung**: Hochgeladene/importierte Bilder werden jetzt
-  anhand der echten Datei-Signatur (Magic Bytes: PNG/JPEG/GIF/WEBP)
-  geprüft statt nur anhand des behaupteten Datei-Präfixes.
-
-**Noch offen (bewusst nicht automatisch eingebaut):** Eine
-Content-Security-Policy wäre ein sinnvoller nächster Schritt, braucht
-aber sorgfältiges Testen — insbesondere `worker-src` muss die
-CDN-Domain enthalten, sonst bleibt die Texterkennung (Tesseract.js)
-lautlos hängen. Vorschlag für die `<meta>`-Zeile in `index.html`:
-
-```html
-<meta http-equiv="Content-Security-Policy" content="
-  default-src 'self';
-  script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net;
-  worker-src 'self' blob: https://cdn.jsdelivr.net;
-  connect-src 'self' https://cdn.jsdelivr.net;
-  style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
-  font-src https://fonts.gstatic.com;
-  img-src 'self' data:;
-  frame-src 'self' data:;
-  object-src 'none';
-  base-uri 'self';
-">
-```
-
-Vor dem Einbau unbedingt im Staging-Repo den kompletten Foto-/PDF-Scan
-einmal durchtesten.
 
 Die App wurde auf typische Web-Schwachstellen geprüft. Behoben:
 
