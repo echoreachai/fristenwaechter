@@ -655,6 +655,9 @@ body{
 }
 .fw-check-row input{ width: 18px; height: 18px; flex-shrink: 0; }
 .fw-check-row.is-locked{ opacity: 0.6; }
+/* Pro-Kategorien: Badge nur zeigen, solange Pro nicht aktiv ist */
+.fw-type-opt .fw-pro-badge{ display: none; margin-left: 4px; vertical-align: middle; }
+.fw-type-opt.is-locked .fw-pro-badge{ display: inline-block; }
 .fw-pro-list{
   margin: 6px 0 12px;
   padding-left: 18px;
