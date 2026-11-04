@@ -21,6 +21,7 @@ WAS DIE APP KANN
 
 • Vier Kategorien: Widerruf/Retoure, Abo-Kündigung, Strafzettel, Offene
 Rechnung – jede mit den passenden Feldern.
+ -PRO: zwei zusätzliche Kategorien - Versicherung & Festgeldkonten
 
 • Beleg-Scan mit Texterkennung: Foto oder PDF hochladen, die App liest
 Datum, Betrag, Anbieter, Referenznummer, IBAN und Zahlungsempfänger
@@ -36,6 +37,12 @@ anderen Gerät wiederherstellen.
 
 • Übersichtliches Dashboard: Auf einen Blick siehst du, welche Fristen
 dringend sind, welche bald anstehen und welche du bereits erledigt hast.
+
+PRO Features: 
+- unbegrenzte Einträge
+- Ersparnis Auswertung
+- Abo auf Serie setzen und automatisch Fristzeitraum zurücksetzen
+- Versicherungen und Festgeld Konten hinterlegen
 
 DEINE DATEN BLEIBEN AUF DEINEM GERÄT
 
@@ -59,11 +66,4 @@ beim Start technische JS-Bibliotheken von CDN-Anbietern (jsDelivr,
 cdnjs, Google Fonts) nach – dabei werden keine App- oder Nutzerdaten
 übertragen, nur die IP-Adresse ist technisch bedingt sichtbar (wie bei
 jedem Laden einer Web-Ressource).
-## Dateien
 
-- `index.html` — App-Grundgerüst
-- `styles.css` — Design (Postbuch-/Stempel-Optik)
-- `app.js` — komplette App-Logik (Fristenberechnung, Speicherung, UI)
-- `manifest.json` — macht die Seite installierbar
-- `sw.js` — Service Worker (Offline-Cache + Best-Effort-Hintergrundprüfung)
-- `icons/` — App-Icons (192px, 512px, maskable)
