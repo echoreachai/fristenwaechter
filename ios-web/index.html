@@ -109,6 +109,8 @@
             <div class="fw-type-opt" data-type="abo">Abo-Kündigung</div>
             <div class="fw-type-opt" data-type="strafzettel">Strafzettel</div>
             <div class="fw-type-opt" data-type="rechnung">Offene Rechnung</div>
+            <div class="fw-type-opt" data-type="versicherung" data-pro="1">Versicherung <span class="fw-pro-badge">PRO</span></div>
+            <div class="fw-type-opt" data-type="festgeld" data-pro="1">Festgeld <span class="fw-pro-badge">PRO</span></div>
             <div class="fw-type-opt" data-type="sonstiges" style="grid-column: span 2">Sonstiges</div>
           </div>
         </div>
@@ -133,7 +135,7 @@
         </div>
 
         <div class="fw-field">
-          <label class="fw-label" for="input-produkt">Produkt / Anbieter</label>
+          <label class="fw-label" for="input-produkt" id="label-produkt">Produkt / Anbieter</label>
           <input class="fw-input" id="input-produkt" placeholder="z. B. Winterjacke, Zalando" required />
         </div>
 
@@ -179,6 +181,83 @@
           <p class="fw-hint">Für alles, was in keine der anderen Kategorien passt.</p>
         </div>
 
+        <div class="fw-field" id="field-versicherung" style="display:none">
+          <label class="fw-label" for="input-vers-art">Versicherungsart</label>
+          <select class="fw-input" id="input-vers-art">
+            <option value="">Bitte wählen …</option>
+            <option value="kfz">Kfz-Versicherung</option>
+            <option value="haftpflicht">Privathaftpflicht</option>
+            <option value="hausrat">Hausrat</option>
+            <option value="wohngebaeude">Wohngebäude</option>
+            <option value="rechtsschutz">Rechtsschutz</option>
+            <option value="unfall">Unfallversicherung</option>
+            <option value="bu">Berufsunfähigkeit</option>
+            <option value="risikoleben">Risikolebensversicherung</option>
+            <option value="zahnzusatz">Zahnzusatz</option>
+            <option value="krankenzusatz">Krankenzusatz</option>
+            <option value="reise">Reiseversicherung</option>
+            <option value="tier">Tierversicherung</option>
+            <option value="handy">Handy-/Elektronikversicherung</option>
+            <option value="sonstige">Sonstige</option>
+          </select>
+          <label class="fw-label" for="input-vers-ablauf" style="margin-top:12px">Ablauf / Hauptfälligkeit</label>
+          <input type="date" class="fw-input" id="input-vers-ablauf" />
+          <p class="fw-hint">Steht im Versicherungsschein oder in der Beitragsrechnung, oft der 01.01. Bis dahin läuft das aktuelle Versicherungsjahr.</p>
+          <label class="fw-label" for="input-vers-frist" style="margin-top:12px">Kündigungsfrist</label>
+          <select class="fw-input" id="input-vers-frist">
+            <option value="1">1 Monat vor Ablauf (z. B. Kfz)</option>
+            <option value="3" selected>3 Monate vor Ablauf (üblich)</option>
+            <option value="0">Keine (täglich / monatlich kündbar)</option>
+          </select>
+          <p class="fw-hint">Die Kündigung muss bis zum berechneten Tag beim Versicherer eingegangen sein.</p>
+          <label class="fw-label" for="input-vers-zahlweise" style="margin-top:12px">Zahlweise des Beitrags</label>
+          <select class="fw-input" id="input-vers-zahlweise">
+            <option value="monatlich">Monatlich</option>
+            <option value="vierteljaehrlich">Vierteljährlich</option>
+            <option value="halbjaehrlich">Halbjährlich</option>
+            <option value="jaehrlich" selected>Jährlich</option>
+          </select>
+          <label class="fw-check-row" id="vers-serie-row">
+            <input type="checkbox" id="input-vers-serie" />
+            <span>🔁 Jedes Jahr wieder erinnern</span>
+          </label>
+          <p class="fw-hint">Kündigst du nicht, springt die Frist nach Ablauf automatisch auf das nächste Versicherungsjahr.</p>
+        </div>
+
+        <div class="fw-field" id="field-festgeld" style="display:none">
+          <label class="fw-label" for="input-fg-beginn">Anlagebeginn</label>
+          <input type="date" class="fw-input" id="input-fg-beginn" />
+          <label class="fw-label" for="input-fg-laufzeit" style="margin-top:12px">Laufzeit</label>
+          <select class="fw-input" id="input-fg-laufzeit">
+            <option value="1">1 Monat</option>
+            <option value="3">3 Monate</option>
+            <option value="6">6 Monate</option>
+            <option value="9">9 Monate</option>
+            <option value="12" selected>12 Monate</option>
+            <option value="18">18 Monate</option>
+            <option value="24">2 Jahre</option>
+            <option value="36">3 Jahre</option>
+            <option value="48">4 Jahre</option>
+            <option value="60">5 Jahre</option>
+            <option value="120">10 Jahre</option>
+            <option value="">Individuell (Datum unten)</option>
+          </select>
+          <label class="fw-label" for="input-fg-faellig" style="margin-top:12px">Fällig am (Laufzeitende)</label>
+          <input type="date" class="fw-input" id="input-fg-faellig" />
+          <p class="fw-hint">Wird aus Beginn und Laufzeit berechnet. Du kannst das Datum auch direkt eintragen.</p>
+          <label class="fw-label" for="input-fg-zins" style="margin-top:12px">Zinssatz in % pro Jahr (optional)</label>
+          <input type="text" inputmode="decimal" autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="done" class="fw-input" id="input-fg-zins" placeholder="z. B. 2,75" />
+          <label class="fw-label" for="input-fg-vorlauf" style="margin-top:12px">Erinnern</label>
+          <select class="fw-input" id="input-fg-vorlauf">
+            <option value="0">Am Fälligkeitstag</option>
+            <option value="7">1 Woche vorher</option>
+            <option value="14" selected>2 Wochen vorher</option>
+            <option value="30">1 Monat vorher</option>
+          </select>
+          <p class="fw-hint">Viele Banken verlängern Festgeld automatisch, wenn du ihnen nicht rechtzeitig sagst, was mit dem Geld passieren soll.</p>
+          <p class="fw-hint" id="fg-zinsen-line" style="display:none;color:var(--ink);font-weight:600"></p>
+        </div>
+
         <div class="fw-field" id="field-garantie" style="display:none">
           <label class="fw-label" for="input-kaufdatum">Kaufdatum</label>
           <input type="date" class="fw-input" id="input-kaufdatum" />
@@ -188,12 +267,12 @@
         </div>
 
         <div class="fw-field">
-          <span class="fw-label">Berechnetes Fristende</span>
+          <span class="fw-label" id="label-preview">Berechnetes Fristende</span>
           <div class="fw-preview-line" id="preview-line"></div>
         </div>
 
         <div class="fw-field">
-          <label class="fw-label" for="input-betrag">Betrag in € (optional)</label>
+          <label class="fw-label" for="input-betrag" id="label-betrag">Betrag in € (optional)</label>
           <input type="text" inputmode="decimal" autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="done" class="fw-input" id="input-betrag" placeholder="z. B. 49,90" />
         </div>
 
@@ -349,6 +428,7 @@
           <li><strong>Unbegrenzte Einträge</strong> — statt 10 offener Einträge in der Gratis-Version</li>
           <li><strong>Ersparnis-Auswertung</strong> — direkt im Dashboard sehen, wie viel du dieses Jahr durch rechtzeitige Kündigungen gespart hast</li>
           <li><strong>Abo-Serien</strong> — laufende Abos setzen ihre Frist automatisch jedes Intervall neu</li>
+          <li><strong>Versicherungen &amp; Festgeld</strong> — Kündigungstermine deiner Versicherungen und Fälligkeiten deiner Festgeldkonten im Blick, mit Kündigungsschreiben und Zinsberechnung</li>
         </ul>
         <div class="fw-plan-options">
           <button type="button" class="fw-plan is-selected" data-plan="yearly">
