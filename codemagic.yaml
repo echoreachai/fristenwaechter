@@ -16,6 +16,9 @@ workflows:
       vars:
         XCODE_PROJECT: "ios/App/App.xcodeproj"
         XCODE_SCHEME: "App"
+        # Versionsnummer im App Store. Bei jedem neuen Update erhöhen
+        # (1.1 -> 1.2 -> 1.3 ...) und genauso in App Store Connect anlegen.
+        APP_VERSION: "1.2"
       node: latest
       xcode: latest
 
@@ -45,8 +48,11 @@ workflows:
       - name: Set up code signing settings
         script: xcode-project use-profiles
 
-      - name: Set build number
+      - name: Set version and build number
         script: |
+          # Versionsnummer (CFBundleShortVersionString) aus APP_VERSION oben
+          sed -i '' "s/MARKETING_VERSION = [^;]*;/MARKETING_VERSION = $APP_VERSION;/g" "$XCODE_PROJECT/project.pbxproj"
+          grep -m1 "MARKETING_VERSION" "$XCODE_PROJECT/project.pbxproj"
           cd ios/App
           agvtool new-version -all "$BUILD_NUMBER"
 
