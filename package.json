@@ -5,6 +5,7 @@
     "@capacitor/filesystem": "8.1.4",
     "@capacitor/ios": "^8.5.0",
     "@capacitor/share": "8.0.3",
+    "@capacitor/status-bar": "8.0.4",
     "@capgo/native-purchases": "8.8.1"
   }
 }

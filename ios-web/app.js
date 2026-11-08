@@ -21,7 +21,7 @@ const IMPRINT_URL = "https://echoreachai.github.io/fristenwaechter/impressum.htm
 
 // Stand der iOS-Webdateien — steht unten im Menü, damit man in TestFlight
 // sofort sieht, ob der neue Build läuft.
-const APP_WEB_VERSION = "2026-11-04b";
+const APP_WEB_VERSION = "2026-11-08a";
 
 // In der iOS-App stellt die Capacitor-Bridge nur window.Capacitor.nativePromise
 // bereit. Capacitor.registerPlugin() gibt es dort NICHT — das kommt aus dem
@@ -1132,7 +1132,7 @@ function statusOf(entry) {
 }
 const STATUS_META = {
   dringend: { label: "Dringend", color: "var(--red)" },
-  bald: { label: "Bald fällig", color: "var(--amber)" },
+  bald: { label: "Bald fällig", color: "var(--amber-ink)" },
   sicher: { label: "Sicher", color: "var(--green)" },
   abgelaufen: { label: "Abgelaufen", color: "var(--slate)" },
   erledigt: { label: "Erledigt", color: "var(--slate)" },
@@ -1494,9 +1494,11 @@ function render() {
   if (hasProAccess()) {
     statSavings.textContent = formatEuro(computeSavingsThisYear());
     statSavingsBtn.classList.remove("is-locked");
+    statSavingsBtn.setAttribute("aria-label", `Gespart ${year}: ${statSavings.textContent}`);
   } else {
     statSavings.textContent = "🔒";
     statSavingsBtn.classList.add("is-locked");
+    statSavingsBtn.setAttribute("aria-label", `Gespart ${year} – Pro-Funktion, gesperrt`);
   }
 
   // Garantien laufen als eigener Bereich (Garantie-Archiv) getrennt von
@@ -1516,8 +1518,11 @@ function render() {
 
   const activeGarantien = garantieEntries.filter((e) => e.status !== "erledigt");
   const garantienBaldFaellig = activeGarantien.some((e) => ["dringend", "bald", "abgelaufen"].includes(statusOf(e)));
-  statGarantie.textContent = activeGarantien.length;
-  statGarantie.style.color = garantienBaldFaellig ? "var(--amber)" : "var(--ink)";
+  // Nicht nur über die Farbe: bald ablaufende Garantien bekommen ein „!“
+  statGarantie.textContent = garantienBaldFaellig ? `${activeGarantien.length}!` : String(activeGarantien.length);
+  statGarantie.style.color = garantienBaldFaellig ? "var(--amber-ink)" : "var(--ink)";
+  $("#stat-garantie-btn").setAttribute("aria-label",
+    `Garantie-Archiv: ${activeGarantien.length} ${activeGarantien.length === 1 ? "Garantie" : "Garantien"}${garantienBaldFaellig ? ", davon mindestens eine läuft bald ab" : ""}`);
 
   const query = searchQuery.trim().toLowerCase();
   let visible = fristEntries.filter((e) => {
@@ -1560,6 +1565,7 @@ function stampSVG(status, dleft) {
     const months = Math.floor(dleft / 30.44);
     big = String(months); small = "MONATE ÜBRIG";
   }
+  else if (dleft === 0) { big = "0"; small = "HEUTE FÄLLIG"; }
   else { big = String(dleft); small = dleft === 1 ? "TAG ÜBRIG" : "TAGE ÜBRIG"; }
   const fontSize = big.length > 3 ? 16 : big.length > 2 ? 20 : 26;
   return `
@@ -1571,6 +1577,16 @@ function stampSVG(status, dleft) {
       <text x="50" y="66" text-anchor="middle" font-size="7.2" font-weight="700" letter-spacing="0.5" fill="${meta.color}" font-family="var(--font-mono)">${small}</text>
     </g>
   </svg>`;
+}
+
+// Klartext für Screenreader (der Stempel selbst ist nur Grafik)
+function srStatusText(status, dleft) {
+  if (status === "erledigt") return "erledigt.";
+  if (status === "abgelaufen") return `abgelaufen, seit ${Math.abs(dleft)} ${Math.abs(dleft) === 1 ? "Tag" : "Tagen"} überfällig.`;
+  const label = STATUS_META[status] ? STATUS_META[status].label : "";
+  if (dleft === 0) return `${label}, heute fällig.`;
+  if (dleft === 1) return `${label}, noch 1 Tag.`;
+  return `${label}, noch ${dleft} Tage.`;
 }
 
 function metaLine(entry) {
@@ -1625,15 +1641,17 @@ function renderCard(entry) {
 
   const card = document.createElement("div");
   card.className = `fw-card ${isErledigt ? "is-erledigt" : ""}`;
+  card.setAttribute("role", "listitem");
   card.innerHTML = `
     ${stampSVG(status, dleft)}
     <div class="fw-card-body">
-      <div class="fw-card-top">
+      <span class="fw-sr-only fw-sr-status"></span>
+      <div class="fw-card-top" aria-hidden="true">
         <span class="fw-type-badge"></span>
         <span class="fw-type-badge" style="color:${meta.color};border-color:${meta.color}">${meta.label}</span>
       </div>
       <div class="fw-title-row">
-        <p class="fw-produkt ${isErledigt ? "strike" : ""}"></p>
+        <p class="fw-produkt ${isErledigt ? "strike" : ""}" role="heading" aria-level="2"></p>
         ${entry.betrag !== null && entry.betrag !== undefined && entry.betrag !== "" ? `<p class="fw-amount"></p>` : ""}
       </div>
       <p class="fw-meta"></p>
@@ -1652,6 +1670,9 @@ function renderCard(entry) {
     </div>
   `;
   card.querySelector(".fw-type-badge").textContent = typeLabel;
+  card.querySelector(".fw-sr-status").textContent = `${typeLabel}, ${srStatusText(status, dleft)}`;
+  // Buttons mit Eintragsnamen, damit „Löschen“ & Co. im Screenreader eindeutig sind
+  card.querySelectorAll(".fw-action").forEach((b) => b.setAttribute("aria-label", `${b.textContent}: ${entry.produkt}`));
   // Texte per textContent setzen (XSS-sicher bei Nutzereingaben)
   card.querySelector(".fw-produkt").textContent = entry.produkt;
   const amountEl = card.querySelector(".fw-amount");
@@ -2695,8 +2716,15 @@ menuBtn.addEventListener("click", (e) => {
   menuDropdown.style.display = open ? "none" : "block";
   menuBtn.setAttribute("aria-expanded", String(!open));
 });
-document.addEventListener("click", () => { menuDropdown.style.display = "none"; });
+document.addEventListener("click", () => { menuDropdown.style.display = "none"; menuBtn.setAttribute("aria-expanded", "false"); });
 menuDropdown.addEventListener("click", (e) => e.stopPropagation());
+menuDropdown.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    menuDropdown.style.display = "none";
+    menuBtn.setAttribute("aria-expanded", "false");
+    menuBtn.focus();
+  }
+});
 
 /* ---- Export ---- */
 const exportOverlay = $("#export-overlay");
@@ -3562,6 +3590,288 @@ function openComparePopup(entry) {
 }
 $("#compare-close").addEventListener("click", () => { compareOverlay.style.display = "none"; });
 compareOverlay.addEventListener("mousedown", (e) => { if (e.target === compareOverlay) compareOverlay.style.display = "none"; });
+
+
+/* =========================================================
+   Bedienungshilfen
+   - Design (Automatisch/Hell/Dunkel), Kontrast, Textgröße, Bewegung
+   - Dialoge für Screenreader (Fokus, Escape, Hintergrund sperren)
+   - Tastaturbedienung der Art-Auswahl, ARIA-Zustände
+   ========================================================= */
+const A11Y_KEY = "fw_a11y";
+const A11Y_DEFAULTS = { theme: "auto", contrast: "auto", textSize: "auto", motion: "auto" };
+const IS_IOS_DEVICE = IS_IOS_APP || /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+  (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const StatusBarPlugin = IS_IOS_APP ? nativePlugin("StatusBar") : null;
+
+function loadA11y() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(A11Y_KEY) || "{}");
+    const out = { ...A11Y_DEFAULTS };
+    if (["auto", "light", "dark"].includes(raw.theme)) out.theme = raw.theme;
+    if (["auto", "normal", "more"].includes(raw.contrast)) out.contrast = raw.contrast;
+    if (raw.textSize === "auto" || (Number(raw.textSize) >= 0.85 && Number(raw.textSize) <= 1.6)) out.textSize = String(raw.textSize);
+    if (["auto", "reduce"].includes(raw.motion)) out.motion = raw.motion;
+    return out;
+  } catch (e) {
+    return { ...A11Y_DEFAULTS };
+  }
+}
+function saveA11y(settings) {
+  try { localStorage.setItem(A11Y_KEY, JSON.stringify(settings)); } catch (e) { /* privater Modus o. ä. */ }
+}
+let a11ySettings = loadA11y();
+
+function mq(query) { return !!(window.matchMedia && window.matchMedia(query).matches); }
+
+// iPhone: „Automatisch“ übernimmt die Textgröße aus Einstellungen > Anzeige & Helligkeit > Textgröße
+// (Dynamic Type). Standard ist 17 pt -> Faktor 1. Android/Chrome skaliert selbst nach der Systemschrift.
+function systemTextScale() {
+  if (!IS_IOS_DEVICE || !document.body) return 1;
+  const probe = document.createElement("span");
+  probe.style.cssText = "position:absolute;visibility:hidden;pointer-events:none;font:-apple-system-body";
+  probe.textContent = "A";
+  document.body.appendChild(probe);
+  const px = parseFloat(getComputedStyle(probe).fontSize);
+  probe.remove();
+  if (!px || !isFinite(px)) return 1;
+  return Math.min(1.6, Math.max(0.85, Math.round((px / 17) * 100) / 100));
+}
+
+function resolvedA11y() {
+  const s = a11ySettings;
+  return {
+    theme: s.theme === "auto" ? (mq("(prefers-color-scheme: dark)") ? "dark" : "light") : s.theme,
+    contrast: s.contrast === "auto" ? (mq("(prefers-contrast: more)") ? "more" : "normal") : s.contrast,
+    motion: s.motion === "reduce" || mq("(prefers-reduced-motion: reduce)") ? "reduce" : "auto",
+    textSize: s.textSize === "auto" ? systemTextScale() : Number(s.textSize),
+  };
+}
+
+function applyA11y() {
+  const r = resolvedA11y();
+  const root = document.documentElement;
+  root.setAttribute("data-theme", r.theme);
+  root.setAttribute("data-contrast", r.contrast);
+  root.setAttribute("data-motion", r.motion);
+  root.style.setProperty("--fs", String(r.textSize));
+  root.setAttribute("data-text", r.textSize >= 1.25 ? "large" : "normal");
+  // Browser-/Systemleiste (Android-Chrome, installierte PWA)
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute("content", r.theme === "dark" ? (r.contrast === "more" ? "#000000" : "#171E27") : "#1D2B3A");
+  // iOS-App: Uhrzeit/Akku in der Statusleiste hell auf dunklem Design, dunkel auf hellem
+  if (StatusBarPlugin) {
+    try {
+      Promise.resolve(StatusBarPlugin.setStyle({ style: r.theme === "dark" ? "DARK" : "LIGHT" })).catch(() => {});
+    } catch (e) { /* ältere App-Version ohne StatusBar-Plugin */ }
+  }
+  updateA11yDialogInfo(r);
+}
+
+// Systemänderungen live übernehmen (z. B. Dunkelmodus nach Sonnenuntergang)
+["(prefers-color-scheme: dark)", "(prefers-contrast: more)", "(prefers-reduced-motion: reduce)"].forEach((q) => {
+  if (!window.matchMedia) return;
+  const m = window.matchMedia(q);
+  if (typeof m.addEventListener === "function") m.addEventListener("change", applyA11y);
+  else if (typeof m.addListener === "function") m.addListener(applyA11y);
+});
+// Dynamic Type kann sich ändern, während die App im Hintergrund ist
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && a11ySettings.textSize === "auto") applyA11y();
+});
+
+const a11yOverlay = $("#a11y-overlay");
+function syncA11yRadios() {
+  const map = { "a11y-theme": a11ySettings.theme, "a11y-contrast": a11ySettings.contrast, "a11y-text": a11ySettings.textSize, "a11y-motion": a11ySettings.motion };
+  Object.entries(map).forEach(([name, value]) => {
+    document.querySelectorAll(`input[name="${name}"]`).forEach((inp) => { inp.checked = inp.value === String(value); });
+  });
+}
+function updateA11yDialogInfo(r) {
+  const info = $("#a11y-system");
+  if (!info) return;
+  const sys = [
+    mq("(prefers-color-scheme: dark)") ? "dunkel" : "hell",
+    mq("(prefers-contrast: more)") ? "hoher Kontrast" : "normaler Kontrast",
+    mq("(prefers-reduced-motion: reduce)") ? "Bewegung reduziert" : "Animationen an",
+  ];
+  info.textContent = `Dein System meldet gerade: ${sys.join(" · ")}.`;
+  const hint = $("#a11y-text-hint");
+  if (hint) {
+    hint.textContent = IS_IOS_DEVICE
+      ? `„Automatisch“ folgt der Textgröße in den iPhone-Einstellungen (aktuell ${Math.round(r.textSize * 100)} %).`
+      : "„Automatisch“ nutzt die Schriftgröße deines Geräts.";
+  }
+}
+function openA11ySettings() {
+  menuDropdown.style.display = "none";
+  menuBtn.setAttribute("aria-expanded", "false");
+  syncA11yRadios();
+  updateA11yDialogInfo(resolvedA11y());
+  a11yOverlay.style.display = "flex";
+}
+function closeA11ySettings() { a11yOverlay.style.display = "none"; }
+$("#menu-a11y").addEventListener("click", openA11ySettings);
+$("#a11y-close").addEventListener("click", closeA11ySettings);
+$("#a11y-done").addEventListener("click", closeA11ySettings);
+a11yOverlay.addEventListener("mousedown", (e) => { if (e.target === a11yOverlay) closeA11ySettings(); });
+$("#a11y-reset").addEventListener("click", () => {
+  a11ySettings = { ...A11Y_DEFAULTS };
+  saveA11y(a11ySettings);
+  syncA11yRadios();
+  applyA11y();
+  showToast("Darstellung zurückgesetzt");
+});
+a11yOverlay.addEventListener("change", (e) => {
+  const t = e.target;
+  if (!t || t.type !== "radio") return;
+  const key = { "a11y-theme": "theme", "a11y-contrast": "contrast", "a11y-text": "textSize", "a11y-motion": "motion" }[t.name];
+  if (!key) return;
+  a11ySettings = { ...a11ySettings, [key]: t.value };
+  saveA11y(a11ySettings);
+  applyA11y();
+});
+
+/* ---- Dialoge: Rolle, Fokus, Escape, Hintergrund sperren ---- */
+const dialogStack = [];
+const dialogReturnFocus = new Map();
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+function isShown(el) { return el && el.style.display !== "none" && el.getClientRects().length > 0; }
+function updateInert() {
+  const top = dialogStack[dialogStack.length - 1];
+  Array.from(document.body.children).forEach((el) => {
+    if (el.tagName === "SCRIPT" || el.id === "fw-toast") return;
+    const shouldBeInert = !!top && el !== top;
+    if (shouldBeInert) { el.setAttribute("inert", ""); el.setAttribute("aria-hidden", "true"); }
+    else { el.removeAttribute("inert"); el.removeAttribute("aria-hidden"); }
+  });
+}
+function onDialogShown(ov) {
+  if (dialogStack.includes(ov)) return;
+  dialogReturnFocus.set(ov, document.activeElement);
+  dialogStack.push(ov);
+  updateInert();
+  const box = ov.querySelector(".fw-modal, .fw-viewer-box");
+  const title = box && box.querySelector(".fw-modal-title");
+  // Erst den Titel ansagen lassen (VoiceOver/TalkBack), dann kann man weiterwischen
+  const target = title || (box && box.querySelector(FOCUSABLE));
+  if (target) {
+    if (target === title) title.setAttribute("tabindex", "-1");
+    setTimeout(() => {
+      // Hat der Dialog selbst schon ein Feld fokussiert (z. B. „Produkt“), nichts ändern
+      if (ov.contains(document.activeElement)) return;
+      try { target.focus({ preventScroll: true }); } catch (e) { target.focus(); }
+    }, 30);
+  }
+}
+function onDialogHidden(ov) {
+  const i = dialogStack.indexOf(ov);
+  if (i === -1) return;
+  dialogStack.splice(i, 1);
+  updateInert();
+  let back = dialogReturnFocus.get(ov);
+  dialogReturnFocus.delete(ov);
+  // Kam der Dialog aus dem (inzwischen geschlossenen) Menü, zurück auf den Menü-Knopf
+  if (back && back.closest && back.closest("#menu-dropdown")) back = menuBtn;
+  if (back && document.contains(back) && typeof back.focus === "function" && back.getClientRects().length > 0) {
+    try { back.focus({ preventScroll: true }); } catch (e) { /* egal */ }
+  }
+}
+function closeTopDialog() {
+  const top = dialogStack[dialogStack.length - 1];
+  if (!top) return false;
+  const closer = Array.from(top.querySelectorAll(
+    '.fw-viewer-close, [id$="-close"], [id$="-cancel"], #btn-cancel, #pro-close-active'
+  )).find((b) => isShown(b) || b.offsetParent !== null);
+  if (closer) { closer.click(); return true; }
+  return false;
+}
+function initDialogs() {
+  document.querySelectorAll(".fw-overlay, .fw-viewer-overlay").forEach((ov) => {
+    const box = ov.querySelector(".fw-modal, .fw-viewer-box");
+    if (box) {
+      box.setAttribute("role", "dialog");
+      box.setAttribute("aria-modal", "true");
+      const title = box.querySelector(".fw-modal-title");
+      if (title) {
+        if (!title.id) title.id = `${ov.id || "dlg"}-title`;
+        box.setAttribute("aria-labelledby", title.id);
+      } else if (ov.id === "fw-viewer-overlay") {
+        box.setAttribute("aria-label", "Beleg");
+      }
+    }
+    new MutationObserver(() => {
+      if (ov.style.display !== "none") onDialogShown(ov); else onDialogHidden(ov);
+    }).observe(ov, { attributes: true, attributeFilter: ["style"] });
+  });
+  document.addEventListener("keydown", (e) => {
+    const top = dialogStack[dialogStack.length - 1];
+    if (!top) return;
+    if (e.key === "Escape") {
+      if (closeTopDialog()) e.preventDefault();
+      return;
+    }
+    if (e.key === "Tab") {
+      const items = Array.from(top.querySelectorAll(FOCUSABLE)).filter((el) => el.getClientRects().length > 0);
+      if (!items.length) return;
+      const first = items[0], last = items[items.length - 1];
+      if (e.shiftKey && (document.activeElement === first || !top.contains(document.activeElement))) { last.focus(); e.preventDefault(); }
+      else if (!e.shiftKey && (document.activeElement === last || !top.contains(document.activeElement))) { first.focus(); e.preventDefault(); }
+    }
+  });
+}
+
+/* ---- ARIA-Zustände aus den vorhandenen CSS-Klassen ableiten ---- */
+function syncAriaState(el) {
+  if (el.classList.contains("fw-type-opt")) {
+    el.setAttribute("aria-checked", String(el.classList.contains("active")));
+  } else if (el.classList.contains("fw-tab")) {
+    el.setAttribute("aria-pressed", String(el.classList.contains("active")));
+  } else if (el.classList.contains("fw-plan")) {
+    el.setAttribute("aria-pressed", String(el.classList.contains("is-selected")));
+  }
+}
+function initAriaStates() {
+  document.querySelectorAll(".fw-type-opt").forEach((opt) => {
+    opt.setAttribute("role", "radio");
+    opt.setAttribute("tabindex", "0");
+    opt.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); opt.click(); }
+      if (["ArrowRight", "ArrowDown", "ArrowLeft", "ArrowUp"].includes(e.key)) {
+        const all = Array.from(document.querySelectorAll(".fw-type-opt")).filter((o) => o.getClientRects().length > 0);
+        const step = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : -1;
+        const next = all[(all.indexOf(opt) + step + all.length) % all.length];
+        if (next) { e.preventDefault(); next.focus(); }
+      }
+    });
+  });
+  document.querySelectorAll(".fw-type-opt, .fw-tab, .fw-plan").forEach(syncAriaState);
+  new MutationObserver((muts) => {
+    muts.forEach((m) => { if (m.target.nodeType === 1) syncAriaState(m.target); });
+  }).observe(document.body, { subtree: true, attributes: true, attributeFilter: ["class"] });
+}
+
+/* ---- Deko-Emojis am Textanfang nicht vorlesen („Schild Garantie-Archiv“) ---- */
+function hideLeadingEmoji(root) {
+  const re = /^(\s*)((?:\p{Extended_Pictographic}|\p{Regional_Indicator})(?:️|‍(?:\p{Extended_Pictographic}))*\s*)/u;
+  root.querySelectorAll("button, label, .fw-label, .fw-stat-label, .fw-modal-title").forEach((el) => {
+    const first = el.firstChild;
+    if (!first || first.nodeType !== 3) return;
+    const m = first.nodeValue.match(re);
+    if (!m) return;
+    const span = document.createElement("span");
+    span.setAttribute("aria-hidden", "true");
+    span.textContent = m[2];
+    first.nodeValue = first.nodeValue.slice(m[0].length);
+    el.insertBefore(span, first);
+  });
+}
+
+try { initDialogs(); } catch (e) { console.warn("Dialog-Hilfen:", e); }
+try { initAriaStates(); } catch (e) { console.warn("ARIA-Hilfen:", e); }
+try { hideLeadingEmoji(document); } catch (e) { /* ältere Browser ohne Unicode-Properties */ }
+applyA11y();
 
 /* ---------- Service Worker registrieren ---------- */
 

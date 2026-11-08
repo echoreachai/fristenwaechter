@@ -12,6 +12,24 @@
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <script>
+    // Bedienungshilfen so früh wie möglich anwenden, damit beim Start nichts hell aufblitzt.
+    // Die eigentliche Logik (inkl. Live-Umschalten) steckt in app.js -> applyA11y().
+    (function () {
+      try {
+        var s = JSON.parse(localStorage.getItem("fw_a11y") || "{}"), d = document.documentElement;
+        var mm = function (q) { return !!(window.matchMedia && window.matchMedia(q).matches); };
+        var t = (s.theme === "dark" || s.theme === "light") ? s.theme : (mm("(prefers-color-scheme: dark)") ? "dark" : "light");
+        var c = (s.contrast === "more" || s.contrast === "normal") ? s.contrast : (mm("(prefers-contrast: more)") ? "more" : "normal");
+        d.setAttribute("data-theme", t);
+        d.setAttribute("data-contrast", c);
+        d.setAttribute("data-motion", s.motion === "reduce" || mm("(prefers-reduced-motion: reduce)") ? "reduce" : "auto");
+        var f = parseFloat(s.textSize);
+        if (f >= 0.85 && f <= 1.6) d.style.setProperty("--fs", String(f));
+        if (t === "dark") { var m = document.querySelector('meta[name="theme-color"]'); if (m) m.setAttribute("content", "#171E27"); }
+      } catch (e) {}
+    })();
+  </script>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -29,6 +47,7 @@
           <button class="fw-menu-item" id="menu-import">📥 Backup importieren</button>
           <button class="fw-menu-item" id="menu-sender">👤 Absenderdaten</button>
           <button class="fw-menu-item" id="menu-garantie">🛡️ Garantie-Archiv</button>
+          <button class="fw-menu-item" id="menu-a11y">🎨 Darstellung &amp; Bedienungshilfen</button>
           <button class="fw-menu-item" id="menu-pro" style="display:none">⭐ Fristen-Wächter Pro</button>
           <button class="fw-menu-item" id="menu-feedback">💬 Feedback senden</button>
           <button class="fw-menu-item" id="menu-legal" style="display:none">📄 Datenschutz &amp; Impressum</button>
@@ -37,13 +56,13 @@
       </div>
     </div>
     <p class="fw-sub">Retouren-Fristen &amp; Kündigungstermine im Blick — lokal &amp; ohne Postfach-Suche.</p>
-    <div class="fw-stats">
+    <div class="fw-stats" role="group" aria-label="Übersicht">
       <div class="fw-stat">
         <div class="fw-stat-num" id="stat-dringend" style="color:var(--red)">0</div>
         <div class="fw-stat-label">Dringend</div>
       </div>
       <div class="fw-stat">
-        <div class="fw-stat-num" id="stat-bald" style="color:var(--amber)">0</div>
+        <div class="fw-stat-num" id="stat-bald" style="color:var(--amber-ink)">0</div>
         <div class="fw-stat-label">Bald fällig</div>
       </div>
       <div class="fw-stat">
@@ -65,15 +84,16 @@
     </div>
   </header>
 
+  <main id="fw-main">
   <div class="fw-notif-banner" id="fw-notif-banner" style="display:none">
     <span></span>
     <button id="fw-notif-btn">Aktivieren</button>
   </div>
 
-  <div class="fw-error" id="fw-error" style="display:none"></div>
+  <div class="fw-error" id="fw-error" role="alert" style="display:none"></div>
 
   <div class="fw-toolbar">
-    <div class="fw-tabs">
+    <div class="fw-tabs" role="group" aria-label="Einträge filtern">
       <button class="fw-tab active" data-filter="aktiv">Aktiv</button>
       <button class="fw-tab" data-filter="erledigt">Erledigt</button>
       <button class="fw-tab" data-filter="alle">Alle</button>
@@ -82,8 +102,8 @@
   </div>
 
   <div class="fw-search-row">
-    <input type="search" class="fw-input" id="search-input" placeholder="Suchen (Titel, Notiz, Referenz) …" />
-    <select class="fw-input" id="sort-select">
+    <input type="search" class="fw-input" id="search-input" placeholder="Suchen (Titel, Notiz, Referenz) …" aria-label="Einträge durchsuchen" />
+    <select class="fw-input" id="sort-select" aria-label="Sortierung">
       <option value="deadline-asc">Frist: bald zuerst</option>
       <option value="deadline-desc">Frist: spät zuerst</option>
       <option value="created-desc">Zuletzt hinzugefügt</option>
@@ -91,7 +111,8 @@
     </select>
   </div>
 
-  <div class="fw-list" id="fw-list"></div>
+  <div class="fw-list" id="fw-list" role="list" aria-label="Fristen"></div>
+  </main>
 
   <button class="fw-fab" id="fab-add" aria-label="Neue Frist hinzufügen">+</button>
 
@@ -102,8 +123,8 @@
       <p class="fw-modal-sub">Alles bleibt lokal auf diesem Gerät gespeichert.</p>
       <form id="fw-form">
         <div class="fw-field" id="field-art">
-          <span class="fw-label">Art</span>
-          <div class="fw-type-toggle">
+          <span class="fw-label" id="label-art">Art</span>
+          <div class="fw-type-toggle" role="radiogroup" aria-labelledby="label-art">
             <div class="fw-type-opt active" data-type="retoure">Widerruf / Retoure</div>
             <div class="fw-type-opt" data-type="abo">Abo-Kündigung</div>
             <div class="fw-type-opt" data-type="strafzettel">Strafzettel</div>
@@ -125,9 +146,9 @@
             <button type="button" class="fw-action" id="btn-add-page-camera">📷 Weitere Seite fotografieren</button>
             <button type="button" class="fw-action" id="btn-add-page-gallery">🖼️ Aus Galerie / Dateien</button>
           </div>
-          <p class="fw-hint" id="file-error" style="display:none;color:var(--red)"></p>
-          <div class="fw-ocr-status" id="ocr-status" style="display:none">
-            <span class="fw-ocr-spinner" id="ocr-spinner"></span>
+          <p class="fw-hint" id="file-error" role="alert" style="display:none;color:var(--red)"></p>
+          <div class="fw-ocr-status" id="ocr-status" role="status" aria-live="polite" style="display:none">
+            <span class="fw-ocr-spinner" id="ocr-spinner" aria-hidden="true"></span>
             <span id="ocr-status-text"></span>
           </div>
           <p class="fw-hint">Füllt Datum, Betrag & mehr automatisch aus — die restlichen Felder unten kannst du danach einfach noch prüfen. Bei mehrseitigen Rechnungen: mehrere Fotos nacheinander hinzufügen, die Erkennung sucht dann über alle Seiten.</p>
@@ -327,7 +348,7 @@
       <p class="fw-modal-sub">Enthält alle Einträge inkl. hinterlegter Fotos/PDFs. Die Datei bleibt bei dir — es wird nichts hochgeladen.</p>
 
       <div class="fw-field">
-        <label class="fw-label" style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;letter-spacing:0;font-size:13.5px;">
+        <label class="fw-label" style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;letter-spacing:0;font-size:calc(13.5px * var(--fs));">
           <input type="checkbox" id="export-encrypt-toggle" style="width:16px;height:16px;" />
           Mit Passwort verschlüsseln
         </label>
@@ -341,7 +362,7 @@
         <input type="password" class="fw-input" id="export-pw2" autocomplete="new-password" />
         <p class="fw-hint">Wichtig: Ohne dieses Passwort lässt sich das Backup später nicht mehr entschlüsseln.</p>
       </div>
-      <p class="fw-hint" id="export-error" style="display:none;color:var(--red)"></p>
+      <p class="fw-hint" id="export-error" role="alert" style="display:none;color:var(--red)"></p>
 
       <div class="fw-modal-actions">
         <button type="button" class="fw-btn-secondary" id="export-cancel">Abbrechen</button>
@@ -365,7 +386,7 @@
         <input type="password" class="fw-input" id="import-pw" autocomplete="current-password" />
       </div>
       <p class="fw-hint" id="import-info" style="display:none"></p>
-      <p class="fw-hint" id="import-error" style="display:none;color:var(--red)"></p>
+      <p class="fw-hint" id="import-error" role="alert" style="display:none;color:var(--red)"></p>
 
       <div class="fw-modal-actions" id="import-initial-actions">
         <button type="button" class="fw-btn-secondary" id="import-cancel">Abbrechen</button>
@@ -395,10 +416,78 @@
         <label class="fw-label" for="sender-plzort">PLZ &amp; Ort</label>
         <input class="fw-input" id="sender-plzort" placeholder="z. B. 47798 Krefeld" />
       </div>
-      <p class="fw-hint" id="sender-error" style="display:none;color:var(--red)"></p>
+      <p class="fw-hint" id="sender-error" role="alert" style="display:none;color:var(--red)"></p>
       <div class="fw-modal-actions">
         <button type="button" class="fw-btn-secondary" id="sender-cancel">Abbrechen</button>
         <button type="button" class="fw-btn-primary" id="sender-save">Speichern</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Darstellung & Bedienungshilfen -->
+  <div class="fw-overlay" id="a11y-overlay" style="display:none">
+    <div class="fw-modal">
+      <div class="fw-modal-header-row">
+        <div>
+          <h2 class="fw-modal-title">Darstellung &amp; Bedienungshilfen</h2>
+          <p class="fw-modal-sub">Gilt nur auf diesem Gerät. „Automatisch“ übernimmt die Einstellung deines Systems.</p>
+        </div>
+        <button type="button" class="fw-viewer-close" id="a11y-close" aria-label="Schließen">✕</button>
+      </div>
+
+      <fieldset class="fw-seg-group">
+        <legend class="fw-label">Design</legend>
+        <div class="fw-seg">
+          <label class="fw-seg-opt"><input type="radio" name="a11y-theme" value="auto" /><span>Automatisch</span></label>
+          <label class="fw-seg-opt"><input type="radio" name="a11y-theme" value="light" /><span>Hell</span></label>
+          <label class="fw-seg-opt"><input type="radio" name="a11y-theme" value="dark" /><span>Dunkel</span></label>
+        </div>
+      </fieldset>
+
+      <fieldset class="fw-seg-group">
+        <legend class="fw-label">Kontrast</legend>
+        <div class="fw-seg">
+          <label class="fw-seg-opt"><input type="radio" name="a11y-contrast" value="auto" /><span>Automatisch</span></label>
+          <label class="fw-seg-opt"><input type="radio" name="a11y-contrast" value="normal" /><span>Normal</span></label>
+          <label class="fw-seg-opt"><input type="radio" name="a11y-contrast" value="more" /><span>Hoch</span></label>
+        </div>
+      </fieldset>
+
+      <fieldset class="fw-seg-group">
+        <legend class="fw-label">Textgröße</legend>
+        <div class="fw-seg">
+          <label class="fw-seg-opt"><input type="radio" name="a11y-text" value="auto" /><span>Automatisch</span></label>
+          <label class="fw-seg-opt"><input type="radio" name="a11y-text" value="1" /><span>Standard</span></label>
+          <label class="fw-seg-opt"><input type="radio" name="a11y-text" value="1.15" /><span>Groß</span></label>
+          <label class="fw-seg-opt"><input type="radio" name="a11y-text" value="1.3" /><span>Sehr groß</span></label>
+          <label class="fw-seg-opt"><input type="radio" name="a11y-text" value="1.5" /><span>Maximal</span></label>
+        </div>
+        <p class="fw-hint" id="a11y-text-hint"></p>
+      </fieldset>
+
+      <fieldset class="fw-seg-group">
+        <legend class="fw-label">Bewegung</legend>
+        <div class="fw-seg">
+          <label class="fw-seg-opt"><input type="radio" name="a11y-motion" value="auto" /><span>Automatisch</span></label>
+          <label class="fw-seg-opt"><input type="radio" name="a11y-motion" value="reduce" /><span>Animationen reduzieren</span></label>
+        </div>
+      </fieldset>
+
+      <span class="fw-label" aria-hidden="true">Vorschau</span>
+      <div class="fw-a11y-preview" aria-hidden="true">
+        <div class="fw-card-top">
+          <span class="fw-type-badge" style="color:var(--red);border-color:var(--red)">Dringend</span>
+          <span class="fw-type-badge" style="color:var(--amber-ink);border-color:var(--amber-ink)">Bald fällig</span>
+          <span class="fw-type-badge" style="color:var(--green);border-color:var(--green)">Sicher</span>
+        </div>
+        <p class="fw-produkt">Rückgabe Winterjacke</p>
+        <p class="fw-meta">Fristende: Fr., 20.11.2026 · noch 3 Tage</p>
+      </div>
+      <p class="fw-hint" id="a11y-system" aria-live="polite"></p>
+
+      <div class="fw-modal-actions">
+        <button type="button" class="fw-btn-secondary" id="a11y-reset">Zurücksetzen</button>
+        <button type="button" class="fw-btn-primary" id="a11y-done">Fertig</button>
       </div>
     </div>
   </div>
@@ -497,9 +586,9 @@
       <div class="fw-field">
         <label class="fw-label" for="feedback-text">Deine Nachricht</label>
         <textarea class="fw-textarea" id="feedback-text" style="min-height:130px" placeholder="Was funktioniert gut, was nicht, welche Ideen hast du?" maxlength="1500"></textarea>
-        <p class="fw-hint" id="feedback-counter">0 / 1500 Zeichen</p>
+        <p class="fw-hint" id="feedback-counter" aria-live="polite">0 / 1500 Zeichen</p>
       </div>
-      <p class="fw-hint" id="feedback-error" style="display:none;color:var(--red)"></p>
+      <p class="fw-hint" id="feedback-error" role="alert" style="display:none;color:var(--red)"></p>
 
       <div class="fw-modal-actions">
         <button type="button" class="fw-btn-secondary" id="feedback-cancel">Abbrechen</button>

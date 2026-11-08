@@ -1,5 +1,11 @@
 {
   "appId": "com.echoreach.fristenwaechter",
   "appName": "Fristen-Wächter",
-  "webDir": "www"
+  "webDir": "www",
+  "plugins": {
+    "StatusBar": {
+      "overlaysWebView": true,
+      "style": "DEFAULT"
+    }
+  }
 }
